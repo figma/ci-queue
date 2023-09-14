@@ -1,3 +1,16 @@
+export type InitConfig = {
+  buildId: string;
+  workerId: string;
+  seed?: string;
+  redisTTL?: number;
+  maxRequeues?: number;
+  requeueTolerance?: number;
+  maxTestsAllowedToFail?: number;
+  timeout?: number;
+  reportTimeout?: number;
+  inactiveWorkersTimeout?: number;
+};
+
 export class Configuration {
   buildId: string;
   workerId: string;
@@ -10,28 +23,39 @@ export class Configuration {
   reportTimeout: number;
   inactiveWorkersTimeout: number;
 
-  constructor(
-    buildId: string,
-    workerId: string,
-    seed?: string,
-    redisTTL: number = 8 * 60 * 60,
-    maxRequeues: number = 0,
-    requeueTolerance: number = 0,
-    maxTestsAllowedToFail: number = 0,
-    timeout: number = 30,
-    reportTimeout?: number,
-    inactiveWorkersTimeout?: number,
-  ) {
+  constructor({
+    buildId,
+    workerId,
+    seed,
+    redisTTL,
+    maxRequeues,
+    requeueTolerance,
+    maxTestsAllowedToFail,
+    timeout,
+    reportTimeout,
+    inactiveWorkersTimeout,
+  }: {
+    buildId: string;
+    workerId: string;
+    seed?: string;
+    redisTTL?: number;
+    maxRequeues?: number;
+    requeueTolerance?: number;
+    maxTestsAllowedToFail?: number;
+    timeout?: number;
+    reportTimeout?: number;
+    inactiveWorkersTimeout?: number;
+  }) {
     this.buildId = buildId;
     this.workerId = workerId;
     this.seed = seed;
-    this.maxRequeues = maxRequeues;
-    this.requeueTolerance = requeueTolerance;
-    this.maxTestsAllowedToFail = maxTestsAllowedToFail;
-    this.redisTTL = redisTTL;
-    this.timeout = timeout;
-    this.reportTimeout = reportTimeout ?? timeout;
-    this.inactiveWorkersTimeout = inactiveWorkersTimeout ?? timeout;
+    this.redisTTL = redisTTL ?? 8 * 60 * 60;
+    this.maxRequeues = maxRequeues ?? 0;
+    this.requeueTolerance = requeueTolerance ?? 0;
+    this.maxTestsAllowedToFail = maxTestsAllowedToFail ?? 0;
+    this.timeout = timeout ?? 30;
+    this.reportTimeout = reportTimeout ?? this.timeout;
+    this.inactiveWorkersTimeout = inactiveWorkersTimeout ?? this.timeout;
   }
 
   fromEnv() {
@@ -53,7 +77,7 @@ export class Configuration {
       process.env['HEROKU_TEST_RUN_COMMIT_VERSION'] ||
       process.env['SEMAPHORE_GIT_SHA'];
     const redisTTL = Number(process.env['CI_QUEUE_REDIS_TTL']) || 8 * 60 * 60;
-    return Configuration.constructor(buildId, workerId, seed, redisTTL);
+    return Configuration.constructor({ buildId, workerId, seed, redisTTL });
   }
 
   globalMaxRequeues(testCount: number) {

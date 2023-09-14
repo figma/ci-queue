@@ -1,4 +1,4 @@
-import { RedisScripts, createClient, defineScript } from 'redis';
+import { createClient, defineScript } from 'redis';
 import { readFileSync } from 'node:fs';
 import { sleep } from './utils';
 import { Configuration } from './Configuration';
@@ -9,6 +9,7 @@ export class BaseRunner {
   isMaster: boolean = false;
   config: Configuration;
   client;
+  totalTestCount: number = 0;
   private queueInitialized?: boolean;
   constructor(redisUrl: string, config: Configuration) {
     this.client = createClient({ url: redisUrl, scripts: this.createRedisScripts() });
@@ -16,14 +17,23 @@ export class BaseRunner {
   }
 
   async connect() {
-    await this.client.connect();
+    try {
+      await this.client.connect();
+    } catch (e) {
+      console.error('Worker failed to connect');
+      throw e;
+    }
   }
 
-  async queueIsExhausted(): Promise<boolean> {
-    return (await this.queueIsInitialized()) && (await this.queueSize()) === 0;
+  async disconnect() {
+    await this.client.disconnect();
   }
 
-  async isQueueExpired(): Promise<boolean> {
+  async isExhausted(): Promise<boolean> {
+    return (await this.isInitialized()) && (await this.size()) === 0;
+  }
+
+  async isExpired(): Promise<boolean> {
     const createdAt = await this.client.get(this.key('created-at'));
     return createdAt ? Number(createdAt) + this.config.redisTTL + TEN_MINUTES < Date.now() : true;
   }
@@ -49,7 +59,7 @@ export class BaseRunner {
       return;
     }
     for (let i = 0; i < this.config.timeout * 10 + 1; i++) {
-      if (await this.queueIsInitialized()) {
+      if (await this.isInitialized()) {
         return;
       } else {
         await sleep(100);
@@ -60,15 +70,12 @@ export class BaseRunner {
     );
   }
 
-  async getMasterStatus(): Promise<string> {
+  async getMasterStatus(): Promise<string | null> {
     const masterStatus = await this.client.get(this.key('master-status'));
-    if (!masterStatus) {
-      throw new Error('Master status is null');
-    }
     return masterStatus;
   }
 
-  async queueIsInitialized(): Promise<boolean> {
+  async isInitialized(): Promise<boolean> {
     if (this.queueInitialized) {
       return this.queueInitialized;
     }
@@ -80,13 +87,30 @@ export class BaseRunner {
     return initialized;
   }
 
-  async queueSize() {
+  async size() {
     const [queued, running] = await this.client
       .multi()
       .lLen(this.key('queue'))
       .zCard(this.key('running'))
       .exec();
     return Number(queued) + Number(running);
+  }
+
+  async progress() {
+    const size = await this.size();
+    return this.totalTestCount - size;
+  }
+
+  async toArray(): Promise<string[]> {
+    return (
+      await this.client
+        .multi()
+        .lRange(this.key('queue'), 0, -1)
+        .zRange(this.key('running'), 0, -1)
+        .exec()
+    )
+      .flatMap((t) => t)
+      .reverse() as string[];
   }
 
   key(...args: string[]): string {
@@ -100,7 +124,7 @@ export class BaseRunner {
     return {
       acknowledge: defineScript({
         NUMBER_OF_KEYS: 3,
-        SCRIPT: readFileSync('../../redis/acknowledge.lua').toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../redis/acknowledge.lua`).toString(),
         transformArguments(
           setKey: string,
           processedKey: string,
@@ -112,7 +136,7 @@ export class BaseRunner {
       }),
       requeue: defineScript({
         NUMBER_OF_KEYS: 6,
-        SCRIPT: readFileSync('../../redis/requeue.lua').toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../redis/requeue.lua`).toString(),
         transformArguments(
           processedKey: string,
           requeuesCountKey: string,
@@ -141,15 +165,15 @@ export class BaseRunner {
       }),
       release: defineScript({
         NUMBER_OF_KEYS: 3,
-        SCRIPT: readFileSync('../../redis/release.lua').toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../redis/release.lua`).toString(),
         transformArguments(setKey: string, workerQueueKey: string, ownersKey: string) {
           return [setKey, workerQueueKey, ownersKey];
         },
       }),
 
       reserve: defineScript({
-        NUMBER_OF_KEYS: 4,
-        SCRIPT: readFileSync('../../redis/reserve.lua').toString(),
+        NUMBER_OF_KEYS: 5,
+        SCRIPT: readFileSync(`${__dirname}/../../redis/reserve.lua`).toString(),
         transformArguments(
           queueKey: string,
           setKey: string,
@@ -167,10 +191,13 @@ export class BaseRunner {
             currentTime.toString(),
           ];
         },
+        transformReply(reply: string | null | undefined) {
+          return reply;
+        },
       }),
       reserveLost: defineScript({
         NUMBER_OF_KEYS: 4,
-        SCRIPT: readFileSync('../../redis/reserve_lost.lua').toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../redis/reserve_lost.lua`).toString(),
         transformArguments(
           setKey: string,
           completedKey: string,
@@ -187,6 +214,9 @@ export class BaseRunner {
             currentTime.toString(),
             timeout.toString(),
           ];
+        },
+        transformReply(reply: string | null | undefined) {
+          return reply;
         },
       }),
     };

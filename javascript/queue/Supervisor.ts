@@ -10,7 +10,7 @@ export class Supervisor extends BaseRunner {
 
   async totalTests() {
     await this.waitForMaster();
-    return this.client.get(this.key('total'));
+    return await this.client.get(this.key('total'));
   }
 
   async waitForWorkers() {
@@ -18,7 +18,7 @@ export class Supervisor extends BaseRunner {
     let timeLeft = this.config.reportTimeout;
     let timeLeftWithNoWorkers = this.config.inactiveWorkersTimeout;
     while (
-      !(await this.queueIsExhausted()) &&
+      !(await this.isExhausted()) &&
       timeLeft > 0 &&
       !(await this.maxTestsFailed()) &&
       timeLeftWithNoWorkers > 0
@@ -36,7 +36,7 @@ export class Supervisor extends BaseRunner {
     if (timeLeftWithNoWorkers <= 0) {
       console.log('Aborting, it seems all workers died.');
     }
-    return await this.queueIsExhausted();
+    return await this.isExhausted();
   }
 
   private async workersAreActive() {

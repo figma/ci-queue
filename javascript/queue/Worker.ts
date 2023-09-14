@@ -1,20 +1,19 @@
 import { BaseRunner } from './BaseRunner';
 import { Configuration } from './Configuration';
-import { sleep } from './utils';
+import { shuffleArray, sleep } from './utils';
 
-class Worker extends BaseRunner {
+export class Worker extends BaseRunner {
   private shutdownRequired: boolean = false;
-  private currentlyReservedTest?: string;
-  private totalTestCount: number = 0;
+  private currentlyReservedTest: string | undefined | null;
   constructor(redisUrl: string, config: Configuration) {
     super(redisUrl, config);
   }
 
-  async *poll() {
+  async *pollIter() {
     await this.waitForMaster();
     while (
       !this.shutdownRequired &&
-      !(await this.queueIsExhausted()) &&
+      !(await this.isExhausted()) &&
       !(await this.maxTestsFailed())
     ) {
       const test = await this.reserveTest();
@@ -30,21 +29,28 @@ class Worker extends BaseRunner {
     ]);
   }
 
-  async acknowledge(test: any): Promise<boolean> {
-    const testName = test.id;
-    this.throwOnMismatchingTest(testName);
+  async poll() {
+    await this.waitForMaster();
+    if (this.shutdownRequired || (await this.isExhausted()) || (await this.maxTestsFailed())) {
+      return;
+    }
+    return await this.reserveTest();
+  }
+
+  async acknowledge(test: string): Promise<boolean> {
+    this.throwOnMismatchingTest(test);
     return (
       (await this.client.acknowledge(
         this.key('running'),
         this.key('processed'),
         this.key('owners'),
-        testName,
+        test,
       )) === 1
     );
   }
 
-  async requeue(test: any, offset: number) {
-    const testName = test.id;
+  async requeue(test: string, offset: number = 42) {
+    const testName = test;
     this.throwOnMismatchingTest(testName);
     const globalMaxRequeues = this.config.globalMaxRequeues(this.totalTestCount);
     const requeued =
@@ -77,6 +83,17 @@ class Worker extends BaseRunner {
     );
   }
 
+  async populate(tests: string[], seed?: number) {
+    if (seed !== undefined) {
+      tests = shuffleArray(tests, seed);
+    }
+    await this.push(tests);
+  }
+
+  shutdown() {
+    this.shutdownRequired = true;
+  }
+
   private throwOnMismatchingTest(testName: string) {
     if (this.currentlyReservedTest === testName) {
       this.currentlyReservedTest = undefined;
@@ -85,19 +102,20 @@ class Worker extends BaseRunner {
     }
   }
 
-  private async reserveTest() {
+  private async reserveTest(): Promise<string | undefined | null> {
     if (this.currentlyReservedTest) {
+      console.error(
+        `Currently reserved test found for worker ${this.config.workerId}:`,
+        this.currentlyReservedTest,
+      );
       throw new Error(
-        `${this.currentlyReservedTest} is already reserver. You have to acknowledge it before you can reserver another one`,
+        `${this.currentlyReservedTest} is already reserved. You have to acknowledge it before you can reserve another one`,
       );
     }
 
     const reservedTest = (await this.tryToReserveLostTest()) ?? (await this.tryToReserveTest());
-    if (!reservedTest || typeof reservedTest !== 'string') {
-      throw new Error('Failed to reserve test');
-    }
     this.currentlyReservedTest = reservedTest;
-    return reservedTest;
+    return reservedTest as any;
   }
 
   private async tryToReserveTest() {
@@ -120,9 +138,6 @@ class Worker extends BaseRunner {
       Date.now(),
       this.config.timeout,
     );
-    if (lostTest) {
-      // TODO: Record warning about recovered lost test
-    }
     return lostTest;
   }
 
