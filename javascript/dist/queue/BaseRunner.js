@@ -129,14 +129,14 @@ class BaseRunner {
             }),
             release: (0, redis_1.defineScript)({
                 NUMBER_OF_KEYS: 3,
-                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../redis/release.lua`).toString(),
+                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../../redis/release.lua`).toString(),
                 transformArguments(setKey, workerQueueKey, ownersKey) {
                     return [setKey, workerQueueKey, ownersKey];
                 },
             }),
             reserve: (0, redis_1.defineScript)({
                 NUMBER_OF_KEYS: 5,
-                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../redis/reserve.lua`).toString(),
+                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../../redis/reserve.lua`).toString(),
                 transformArguments(queueKey, setKey, processedKey, workerQueueKey, ownersKey, currentTime) {
                     return [
                         queueKey,
@@ -153,7 +153,7 @@ class BaseRunner {
             }),
             reserveLost: (0, redis_1.defineScript)({
                 NUMBER_OF_KEYS: 4,
-                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../redis/reserve_lost.lua`).toString(),
+                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../../redis/reserve_lost.lua`).toString(),
                 transformArguments(setKey, completedKey, workerQueueKey, ownersKey, currentTime, timeout) {
                     return [
                         setKey,

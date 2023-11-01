@@ -165,7 +165,7 @@ export class BaseRunner {
       }),
       release: defineScript({
         NUMBER_OF_KEYS: 3,
-        SCRIPT: readFileSync(`${__dirname}/../../redis/release.lua`).toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../../redis/release.lua`).toString(),
         transformArguments(setKey: string, workerQueueKey: string, ownersKey: string) {
           return [setKey, workerQueueKey, ownersKey];
         },
@@ -173,7 +173,7 @@ export class BaseRunner {
 
       reserve: defineScript({
         NUMBER_OF_KEYS: 5,
-        SCRIPT: readFileSync(`${__dirname}/../../redis/reserve.lua`).toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../../redis/reserve.lua`).toString(),
         transformArguments(
           queueKey: string,
           setKey: string,
@@ -197,7 +197,7 @@ export class BaseRunner {
       }),
       reserveLost: defineScript({
         NUMBER_OF_KEYS: 4,
-        SCRIPT: readFileSync(`${__dirname}/../../redis/reserve_lost.lua`).toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../../redis/reserve_lost.lua`).toString(),
         transformArguments(
           setKey: string,
           completedKey: string,
