@@ -1,10 +1,10 @@
 {
-  "name": "ciqueue",
+  "name": "ci-queue",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "jest"
+    "test": "cd javascript && jest"
   },
   "author": "",
   "license": "ISC",
