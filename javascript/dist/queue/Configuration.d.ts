@@ -1,4 +1,4 @@
-export declare type InitConfig = {
+export type InitConfig = {
     buildId: string;
     workerId: string;
     seed?: string;
