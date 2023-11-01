@@ -5,7 +5,8 @@
   "main": "./javascript/dist/index.js",
   "types": "./javascript/dist/index.d.ts",
   "files": [
-    "javascript/dist"
+    "javascript/dist",
+    "redis"
   ],
   "scripts": {
     "build": "cd javascript && tsc",
