@@ -104,14 +104,14 @@ class BaseRunner {
         return {
             acknowledge: (0, redis_1.defineScript)({
                 NUMBER_OF_KEYS: 3,
-                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../redis/acknowledge.lua`).toString(),
+                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../../redis/acknowledge.lua`).toString(),
                 transformArguments(setKey, processedKey, ownersKey, testName) {
                     return [setKey, processedKey, ownersKey, testName];
                 },
             }),
             requeue: (0, redis_1.defineScript)({
                 NUMBER_OF_KEYS: 6,
-                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../redis/requeue.lua`).toString(),
+                SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../../redis/requeue.lua`).toString(),
                 transformArguments(processedKey, requeuesCountKey, queueKey, setKey, workerQueueKey, ownersKey, maxRequeues, globalMaxRequeues, testName, offset) {
                     return [
                         processedKey,

@@ -124,7 +124,7 @@ export class BaseRunner {
     return {
       acknowledge: defineScript({
         NUMBER_OF_KEYS: 3,
-        SCRIPT: readFileSync(`${__dirname}/../../redis/acknowledge.lua`).toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../../redis/acknowledge.lua`).toString(),
         transformArguments(
           setKey: string,
           processedKey: string,
@@ -136,7 +136,7 @@ export class BaseRunner {
       }),
       requeue: defineScript({
         NUMBER_OF_KEYS: 6,
-        SCRIPT: readFileSync(`${__dirname}/../../redis/requeue.lua`).toString(),
+        SCRIPT: readFileSync(`${__dirname}/../../../redis/requeue.lua`).toString(),
         transformArguments(
           processedKey: string,
           requeuesCountKey: string,
