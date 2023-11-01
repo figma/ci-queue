@@ -1,0 +1,17 @@
+{
+  "name": "ci-queue-test-ts",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.ts",
+  "scripts": {
+    "test": "ts-node --files run.ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/jasmine": "^4.3.6",
+    "@types/node": "^20.6.3",
+    "jasmine": "^5.1.0",
+    "jasmine-core": "^5.1.1"
+  }
+}
