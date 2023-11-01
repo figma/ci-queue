@@ -58,7 +58,7 @@ export class Configuration {
     this.inactiveWorkersTimeout = inactiveWorkersTimeout ?? this.timeout;
   }
 
-  fromEnv() {
+  static fromEnv() {
     const buildId =
       process.env['CIRCLE_BUILD_URL'] ||
       process.env['BUILDKITE_BUILD_ID'] ||

@@ -2,10 +2,9 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "es2020",
-    "lib": ["es2020", "dom"],
+    "lib": ["es2020"],
     "noEmit": true,
     "strict": true,
-    "jsx": "preserve",
     "esModuleInterop": true,
     "preserveConstEnums": true,
     "resolveJsonModule": true,

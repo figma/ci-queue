@@ -50,7 +50,7 @@ export class BaseRunner {
     return await this.client.get(this.key('test_failed_count'));
   }
 
-  async incTestFailedCount() {
+  async incFailedTestCount() {
     await this.client.incr(this.key('test_failed_count'));
   }
 
