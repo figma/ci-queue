@@ -1,0 +1,39 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Configuration = void 0;
+class Configuration {
+    constructor({ buildId, workerId, seed, redisTTL, maxRequeues, requeueTolerance, maxTestsAllowedToFail, timeout, reportTimeout, inactiveWorkersTimeout, }) {
+        this.buildId = buildId;
+        this.workerId = workerId;
+        this.seed = seed;
+        this.redisTTL = redisTTL ?? 8 * 60 * 60;
+        this.maxRequeues = maxRequeues ?? 0;
+        this.requeueTolerance = requeueTolerance ?? 0;
+        this.maxTestsAllowedToFail = maxTestsAllowedToFail ?? 0;
+        this.timeout = timeout ?? 30;
+        this.reportTimeout = reportTimeout ?? this.timeout;
+        this.inactiveWorkersTimeout = inactiveWorkersTimeout ?? this.timeout;
+    }
+    static fromEnv() {
+        const buildId = process.env['CIRCLE_BUILD_URL'] ||
+            process.env['BUILDKITE_BUILD_ID'] ||
+            process.env['TRAVIS_BUILD_ID'] ||
+            process.env['HEROKU_TEST_RUN_ID'] ||
+            process.env['SEMAPHORE_PIPELINE_ID'];
+        const workerId = process.env['CIRCLE_NODE_INDEX'] ||
+            process.env['BUILDKITE_PARALLEL_JOB'] ||
+            process.env['CI_NODE_INDEX'] ||
+            process.env['SEMAPHORE_JOB_ID'];
+        const seed = process.env['CIRCLE_SHA1'] ||
+            process.env['BUILDKITE_COMMIT'] ||
+            process.env['TRAVIS_COMMIT'] ||
+            process.env['HEROKU_TEST_RUN_COMMIT_VERSION'] ||
+            process.env['SEMAPHORE_GIT_SHA'];
+        const redisTTL = Number(process.env['CI_QUEUE_REDIS_TTL']) || 8 * 60 * 60;
+        return Configuration.constructor({ buildId, workerId, seed, redisTTL });
+    }
+    globalMaxRequeues(testCount) {
+        return Math.ceil(testCount * this.requeueTolerance);
+    }
+}
+exports.Configuration = Configuration;

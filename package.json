@@ -3,13 +3,11 @@
   "version": "1.0.0",
   "description": "",
   "type": "module",
-  "main": "index.ts",
-  "exports": {
-    ".": {
-      "types": "./javascript/dist/index.d.ts",
-      "default": "./javascript/dist/index.js"
-    }
-  },
+  "main": "./javascript/dist/index.js",
+  "types": "./javascript/dist/index.d.ts",
+  "files": [
+    "javascript/dist"
+  ],
   "scripts": {
     "build": "cd javascript && tsc",
     "test": "cd javascript && jest"
@@ -18,12 +16,12 @@
   "license": "ISC",
   "dependencies": {
     "redis": "^4.6.8",
-    "seedrandom": "^3.0.5"
+    "seedrandom": "^3.0.5",
+    "@types/seedrandom": "^3.0.5"
   },
   "devDependencies": {
     "@types/jest": "^29.5.4",
     "@types/node": "^20.5.7",
-    "@types/seedrandom": "^3.0.5",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.1"
   }
