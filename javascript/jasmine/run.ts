@@ -1,6 +1,6 @@
 import { env } from './setup';
 import './tests/index.test';
-import { Worker, Configuration } from '../index';
+import { Worker, Configuration } from '../src/index';
 import Jasmine from 'jasmine';
 
 function getAllSpecIds(topSuite: any) {

@@ -4,6 +4,12 @@
   "description": "",
   "type": "module",
   "main": "index.ts",
+  "exports": {
+    ".": {
+      "types": "./javascript/dist/index.d.ts",
+      "default": "./javascript/dist/index.js"
+    }
+  },
   "scripts": {
     "test": "cd javascript && jest"
   },
