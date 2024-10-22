@@ -27,6 +27,7 @@ export class Supervisor extends BaseRunner {
       await sleep(1000);
 
       if (await this.workersAreActive()) {
+        console.log('Workers are active');
         timeLeftWithNoWorkers = this.config.inactiveWorkersTimeout;
       } else {
         timeLeftWithNoWorkers -= 1;
@@ -42,7 +43,7 @@ export class Supervisor extends BaseRunner {
   private async workersAreActive() {
     const zRangeByScoreArr = await this.client.zRangeByScore(
       this.key('running'),
-      Date.now() - this.config.timeout,
+      Date.now() - this.config.timeout*1000,
       '+inf',
       {
         LIMIT: { offset: 0, count: 1 },
