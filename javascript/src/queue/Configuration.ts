@@ -9,6 +9,7 @@ export type InitConfig = {
   timeout?: number;
   reportTimeout?: number;
   inactiveWorkersTimeout?: number;
+  namespace?: string;
 };
 
 export class Configuration {
@@ -22,6 +23,7 @@ export class Configuration {
   timeout: number;
   reportTimeout: number;
   inactiveWorkersTimeout: number;
+  namespace?: string;
 
   constructor({
     buildId,
@@ -34,6 +36,7 @@ export class Configuration {
     timeout,
     reportTimeout,
     inactiveWorkersTimeout,
+    namespace,
   }: {
     buildId: string;
     workerId: string;
@@ -45,6 +48,7 @@ export class Configuration {
     timeout?: number;
     reportTimeout?: number;
     inactiveWorkersTimeout?: number;
+    namespace?: string;
   }) {
     this.buildId = buildId;
     this.workerId = workerId;
@@ -56,6 +60,7 @@ export class Configuration {
     this.timeout = timeout ?? 30;
     this.reportTimeout = reportTimeout ?? this.timeout;
     this.inactiveWorkersTimeout = inactiveWorkersTimeout ?? this.timeout;
+    this.namespace = namespace;
   }
 
   static fromEnv() {

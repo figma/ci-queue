@@ -117,7 +117,8 @@ export class BaseRunner {
     if (!Array.isArray(args)) {
       args = [args];
     }
-    return ['build', this.config.buildId, ...args].join(':');
+    const uniqueID = this.config.namespace ? `${this.config.namespace}:#${this.config.buildId}` : this.config.buildId;
+    return ['build', uniqueID, ...args].join(':');
   }
 
   private createRedisScripts() {
