@@ -29,7 +29,7 @@ class BaseRunner {
     }
     async isExpired() {
         const createdAt = await this.client.get(this.key('created-at'));
-        return createdAt ? Number(createdAt) + this.config.redisTTL + TEN_MINUTES < Date.now() : true;
+        return createdAt ? Number(createdAt) + this.config.redisTTL + TEN_MINUTES < (Date.now() / 1000) : true;
     }
     async maxTestsFailed() {
         if (!this.config.maxTestsAllowedToFail) {

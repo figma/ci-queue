@@ -125,7 +125,7 @@ export class Worker extends BaseRunner {
       this.key('processed'),
       this.key('worker', this.config.workerId, 'queue'),
       this.key('owners'),
-      Date.now(),
+      Date.now() / 1000,
     );
   }
 
@@ -135,7 +135,7 @@ export class Worker extends BaseRunner {
       this.key('completed'),
       this.key('worker', this.config.workerId, 'queue'),
       this.key('owners'),
-      Date.now(),
+      Date.now() / 1000,
       this.config.timeout,
     );
     return lostTest;

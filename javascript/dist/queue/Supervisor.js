@@ -36,7 +36,7 @@ class Supervisor extends BaseRunner_1.BaseRunner {
         return await this.isExhausted();
     }
     async workersAreActive() {
-        const zRangeByScoreArr = await this.client.zRangeByScore(this.key('running'), Date.now() - this.config.timeout * 1000, '+inf', {
+        const zRangeByScoreArr = await this.client.zRangeByScore(this.key('running'), (Date.now() / 1000) - this.config.timeout, '+inf', {
             LIMIT: { offset: 0, count: 1 },
         });
         return zRangeByScoreArr.length > 0;
