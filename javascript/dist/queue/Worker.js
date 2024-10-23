@@ -79,10 +79,10 @@ class Worker extends BaseRunner_1.BaseRunner {
         return reservedTest;
     }
     async tryToReserveTest() {
-        return await this.client.reserve(this.key('queue'), this.key('running'), this.key('processed'), this.key('worker', this.config.workerId, 'queue'), this.key('owners'), Date.now());
+        return await this.client.reserve(this.key('queue'), this.key('running'), this.key('processed'), this.key('worker', this.config.workerId, 'queue'), this.key('owners'), Date.now() / 1000);
     }
     async tryToReserveLostTest() {
-        const lostTest = await this.client.reserveLost(this.key('running'), this.key('completed'), this.key('worker', this.config.workerId, 'queue'), this.key('owners'), Date.now(), this.config.timeout);
+        const lostTest = await this.client.reserveLost(this.key('running'), this.key('completed'), this.key('worker', this.config.workerId, 'queue'), this.key('owners'), Date.now() / 1000, this.config.timeout);
         return lostTest;
     }
     async push(tests) {
