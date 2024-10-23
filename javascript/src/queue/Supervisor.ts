@@ -49,6 +49,6 @@ export class Supervisor extends BaseRunner {
         LIMIT: { offset: 0, count: 1 },
       },
     );
-    return Number(zRangeByScoreArr[0]) > 0;
+    return zRangeByScoreArr.length > 0;
   }
 }
