@@ -39,7 +39,7 @@ class Supervisor extends BaseRunner_1.BaseRunner {
         const zRangeByScoreArr = await this.client.zRangeByScore(this.key('running'), Date.now() - this.config.timeout * 1000, '+inf', {
             LIMIT: { offset: 0, count: 1 },
         });
-        return Number(zRangeByScoreArr[0]) > 0;
+        return zRangeByScoreArr.length > 0;
     }
 }
 exports.Supervisor = Supervisor;
