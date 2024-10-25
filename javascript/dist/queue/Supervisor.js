@@ -43,7 +43,7 @@ class Supervisor extends BaseRunner_1.BaseRunner {
             const absolutePath = path_1.default.join(process.cwd(), this.config.failureFile);
             const directory = path_1.default.dirname(absolutePath);
             (0, fs_1.mkdirSync)(directory, { recursive: true });
-            (0, fs_1.writeFileSync)(absolutePath, JSON.stringify(failedTests, null, 2));
+            (0, fs_1.writeFileSync)(absolutePath, failedTests);
         }
         return await this.isExhausted();
     }
