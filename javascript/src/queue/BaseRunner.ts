@@ -50,7 +50,7 @@ export class BaseRunner {
     return await this.client.get(this.key('test_failed_count'));
   }
 
-  async recordFailedTest(testName: string, testSuite: string) {
+  async recordFailedTest(testName: string, testSuite: string): Promise<void> {
     const payload = JSON.stringify({ test_name: testName, test_suite: testSuite });
     await this.client.hSet(
       this.key('error-reports'),
@@ -62,11 +62,11 @@ export class BaseRunner {
     await this.client.incr(this.key('test_failed_count'));
   }
 
-  async recordPassingTest(testName: string) {
+  async recordPassingTest(testName: string): Promise<void> {
     await this.client.hDel(this.key('error-reports'), Buffer.from(testName).toString('binary'));
   }
 
-  async getFailedTests() {
+  async getFailedTests(): Promise<string> {
     const failedTests = await this.client.hGetAll(this.key('error-reports'));
     const failures = Object.values(failedTests).map(test => JSON.parse(test));
     return JSON.stringify(failures);
