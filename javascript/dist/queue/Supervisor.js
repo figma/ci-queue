@@ -1,8 +1,13 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Supervisor = void 0;
 const BaseRunner_1 = require("./BaseRunner");
 const utils_1 = require("./utils");
+const fs_1 = require("fs");
+const path_1 = __importDefault(require("path"));
 class Supervisor extends BaseRunner_1.BaseRunner {
     constructor(redisUrl, config) {
         super(redisUrl, config);
@@ -32,6 +37,13 @@ class Supervisor extends BaseRunner_1.BaseRunner {
         }
         if (timeLeftWithNoWorkers <= 0) {
             console.log('Aborting, it seems all workers died.');
+        }
+        if (this.config.failureFile) {
+            const failedTests = await this.getFailedTests();
+            const absolutePath = path_1.default.join(process.cwd(), this.config.failureFile);
+            const directory = path_1.default.dirname(absolutePath);
+            (0, fs_1.mkdirSync)(directory, { recursive: true });
+            (0, fs_1.writeFileSync)(absolutePath, JSON.stringify(failedTests, null, 2));
         }
         return await this.isExhausted();
     }

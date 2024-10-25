@@ -10,6 +10,7 @@ export type InitConfig = {
   reportTimeout?: number;
   inactiveWorkersTimeout?: number;
   namespace?: string;
+  failureFile?: string;
 };
 
 export class Configuration {
@@ -24,7 +25,7 @@ export class Configuration {
   reportTimeout: number;
   inactiveWorkersTimeout: number;
   namespace?: string;
-
+  failureFile?: string;
   constructor({
     buildId,
     workerId,
@@ -37,6 +38,7 @@ export class Configuration {
     reportTimeout,
     inactiveWorkersTimeout,
     namespace,
+    failureFile,
   }: {
     buildId: string;
     workerId: string;
@@ -49,6 +51,7 @@ export class Configuration {
     reportTimeout?: number;
     inactiveWorkersTimeout?: number;
     namespace?: string;
+    failureFile?: string;
   }) {
     this.buildId = buildId;
     this.workerId = workerId;
@@ -61,6 +64,7 @@ export class Configuration {
     this.reportTimeout = reportTimeout ?? this.timeout;
     this.inactiveWorkersTimeout = inactiveWorkersTimeout ?? this.timeout;
     this.namespace = namespace;
+    this.failureFile = failureFile;
   }
 
   static fromEnv() {

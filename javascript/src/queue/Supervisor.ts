@@ -1,7 +1,8 @@
 import { BaseRunner } from './BaseRunner';
 import { Configuration } from './Configuration';
 import { sleep } from './utils';
-
+import { writeFileSync, mkdirSync } from 'fs';
+import path from 'path';
 export class Supervisor extends BaseRunner {
   constructor(redisUrl: string, config: Configuration) {
     super(redisUrl, config);
@@ -36,6 +37,15 @@ export class Supervisor extends BaseRunner {
 
     if (timeLeftWithNoWorkers <= 0) {
       console.log('Aborting, it seems all workers died.');
+    }
+
+    if (this.config.failureFile) {
+      const failedTests = await this.getFailedTests();
+      const absolutePath = path.join(process.cwd(), this.config.failureFile);
+      const directory = path.dirname(absolutePath);
+
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(absolutePath, JSON.stringify(failedTests, null, 2));
     }
     return await this.isExhausted();
   }

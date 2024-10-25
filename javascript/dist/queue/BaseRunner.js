@@ -41,8 +41,19 @@ class BaseRunner {
     async testFailedCount() {
         return await this.client.get(this.key('test_failed_count'));
     }
-    async incFailedTestCount() {
+    async recordFailedTest(testName, testSuite) {
+        const payload = JSON.stringify({ test_name: testName, test_suite: testSuite });
+        await this.client.hSet(this.key('error-reports'), Buffer.from(testName).toString('binary'), Buffer.from(payload).toString('binary'));
+        await this.client.expire(this.key('error-reports'), this.config.redisTTL);
         await this.client.incr(this.key('test_failed_count'));
+    }
+    async recordPassingTest(testName) {
+        await this.client.hDel(this.key('error-reports'), Buffer.from(testName).toString('binary'));
+    }
+    async getFailedTests() {
+        const failedTests = await this.client.hGetAll(this.key('error-reports'));
+        const failures = Object.values(failedTests).map(test => JSON.parse(test));
+        return JSON.stringify(failures);
     }
     async waitForMaster() {
         if (this.isMaster) {
