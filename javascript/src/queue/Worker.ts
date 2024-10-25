@@ -17,10 +17,12 @@ export class Worker extends BaseRunner {
       !(await this.maxTestsFailed())
     ) {
       const test = await this.reserveTest();
+      console.log(`Reserved test: ${test}`);
       if (test) {
         yield test;
       } else {
-        await sleep(50);
+        console.log('Sleeping for 0.5 seconds');
+        await sleep(500);
       }
     }
     await Promise.all([

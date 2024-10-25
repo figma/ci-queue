@@ -14,11 +14,13 @@ class Worker extends BaseRunner_1.BaseRunner {
             !(await this.isExhausted()) &&
             !(await this.maxTestsFailed())) {
             const test = await this.reserveTest();
+            console.log(`Reserved test: ${test}`);
             if (test) {
                 yield test;
             }
             else {
-                await (0, utils_1.sleep)(50);
+                console.log('Sleeping for 0.5 seconds');
+                await (0, utils_1.sleep)(500);
             }
         }
         await Promise.all([
