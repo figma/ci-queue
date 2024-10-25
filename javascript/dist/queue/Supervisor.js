@@ -38,6 +38,11 @@ class Supervisor extends BaseRunner_1.BaseRunner {
         if (timeLeftWithNoWorkers <= 0) {
             console.log('Aborting, it seems all workers died.');
         }
+        const isExhausted = await this.isExhausted();
+        if (!isExhausted) {
+            console.log('Not all tests have finished in time');
+            return false;
+        }
         if (this.config.failureFile) {
             const failedTests = await this.getFailedTests();
             const absolutePath = path_1.default.join(process.cwd(), this.config.failureFile);
@@ -45,7 +50,7 @@ class Supervisor extends BaseRunner_1.BaseRunner {
             (0, fs_1.mkdirSync)(directory, { recursive: true });
             (0, fs_1.writeFileSync)(absolutePath, failedTests);
         }
-        return await this.isExhausted();
+        return true;
     }
     async workersAreActive() {
         const zRangeByScoreArr = await this.client.zRangeByScore(this.key('running'), (Date.now() / 1000) - this.config.timeout, '+inf', {
