@@ -45,7 +45,7 @@ export class Supervisor extends BaseRunner {
       const directory = path.dirname(absolutePath);
 
       mkdirSync(directory, { recursive: true });
-      writeFileSync(absolutePath, JSON.stringify(failedTests, null, 2));
+      writeFileSync(absolutePath, failedTests);
     }
     return await this.isExhausted();
   }
