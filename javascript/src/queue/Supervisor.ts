@@ -39,6 +39,12 @@ export class Supervisor extends BaseRunner {
       console.log('Aborting, it seems all workers died.');
     }
 
+    const isExhausted = await this.isExhausted();
+    if (!isExhausted) {
+      console.log('Not all tests have finished in time');
+      return false;
+    }
+
     if (this.config.failureFile) {
       const failedTests = await this.getFailedTests();
       const absolutePath = path.join(process.cwd(), this.config.failureFile);
@@ -47,7 +53,7 @@ export class Supervisor extends BaseRunner {
       mkdirSync(directory, { recursive: true });
       writeFileSync(absolutePath, failedTests);
     }
-    return await this.isExhausted();
+    return true;
   }
 
   private async workersAreActive() {
