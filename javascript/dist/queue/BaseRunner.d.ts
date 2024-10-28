@@ -330,7 +330,7 @@ export declare class BaseRunner {
     maxTestsFailed(): Promise<boolean>;
     testFailedCount(): Promise<string | null>;
     recordFailedTest(testName: string, testSuite: string): Promise<void>;
-    recordPassingTest(testName: string): Promise<void>;
+    recordPassingTest(testName: string, testSuite: string): Promise<void>;
     getFailedTests(): Promise<string>;
     waitForMaster(): Promise<void>;
     getMasterStatus(): Promise<string | null>;

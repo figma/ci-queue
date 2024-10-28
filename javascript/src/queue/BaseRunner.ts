@@ -51,19 +51,22 @@ export class BaseRunner {
   }
 
   async recordFailedTest(testName: string, testSuite: string): Promise<void> {
+    const fullTestName = `${testName}:${testSuite}`;
     const payload = JSON.stringify({ test_name: testName, test_suite: testSuite });
     await this.client.hSet(
       this.key('error-reports'),
-      Buffer.from(testName).toString('binary'),
+      Buffer.from(fullTestName).toString('binary'),
       Buffer.from(payload).toString('binary')
     );
   
     await this.client.expire(this.key('error-reports'), this.config.redisTTL);
+    console.log(`Incrementing failed test count for ${testName}`);
     await this.client.incr(this.key('test_failed_count'));
   }
 
-  async recordPassingTest(testName: string): Promise<void> {
-    await this.client.hDel(this.key('error-reports'), Buffer.from(testName).toString('binary'));
+  async recordPassingTest(testName: string, testSuite: string): Promise<void> {
+    const fullTestName = `${testName}:${testSuite}`;
+    await this.client.hDel(this.key('error-reports'), Buffer.from(fullTestName).toString('binary'));
   }
 
   async getFailedTests(): Promise<string> {
