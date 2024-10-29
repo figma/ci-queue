@@ -20,7 +20,7 @@ export class BaseRunner {
     try {
       await this.client.connect();
     } catch (e) {
-      console.error('Worker failed to connect');
+      console.error('[ci-queue] Worker failed to connect');
       throw e;
     }
   }
@@ -60,7 +60,7 @@ export class BaseRunner {
     );
   
     await this.client.expire(this.key('error-reports'), this.config.redisTTL);
-    console.log(`Incrementing failed test count for ${testName}`);
+    console.log(`[ci-queue] Incrementing failed test count for ${testName}`);
     await this.client.incr(this.key('test_failed_count'));
   }
 

@@ -9,17 +9,23 @@ class Worker extends BaseRunner_1.BaseRunner {
         this.shutdownRequired = false;
     }
     async *pollIter() {
+        let lastLogTime = 0;
         await this.waitForMaster();
         while (!this.shutdownRequired &&
             !(await this.isExhausted()) &&
             !(await this.maxTestsFailed())) {
             const test = await this.reserveTest();
-            console.log(`Reserved test: ${test}`);
             if (test) {
+                console.log(`[ci-queue] Reserved test: ${test}`);
                 yield test;
             }
             else {
-                console.log('Sleeping for 0.5 seconds');
+                const now = Date.now() / 1000;
+                // Only log every 5s to reduce noise
+                if (now - lastLogTime > 5) {
+                    console.log('[ci-queue] No test to reserve, sleeping');
+                    lastLogTime = now;
+                }
                 await (0, utils_1.sleep)(500);
             }
         }
@@ -73,7 +79,7 @@ class Worker extends BaseRunner_1.BaseRunner {
     }
     async reserveTest() {
         if (this.currentlyReservedTest) {
-            console.error(`Currently reserved test found for worker ${this.config.workerId}:`, this.currentlyReservedTest);
+            console.error(`[ci-queue] Currently reserved test found for worker ${this.config.workerId}:`, this.currentlyReservedTest);
             throw new Error(`${this.currentlyReservedTest} is already reserved. You have to acknowledge it before you can reserve another one`);
         }
         const reservedTest = (await this.tryToReserveLostTest()) ?? (await this.tryToReserveTest());

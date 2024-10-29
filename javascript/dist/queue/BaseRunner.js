@@ -17,7 +17,7 @@ class BaseRunner {
             await this.client.connect();
         }
         catch (e) {
-            console.error('Worker failed to connect');
+            console.error('[ci-queue] Worker failed to connect');
             throw e;
         }
     }
@@ -46,7 +46,7 @@ class BaseRunner {
         const payload = JSON.stringify({ test_name: testName, test_suite: testSuite });
         await this.client.hSet(this.key('error-reports'), Buffer.from(fullTestName).toString('binary'), Buffer.from(payload).toString('binary'));
         await this.client.expire(this.key('error-reports'), this.config.redisTTL);
-        console.log(`Incrementing failed test count for ${testName}`);
+        console.log(`[ci-queue] Incrementing failed test count for ${testName}`);
         await this.client.incr(this.key('test_failed_count'));
     }
     async recordPassingTest(testName, testSuite) {

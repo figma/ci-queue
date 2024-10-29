@@ -28,7 +28,10 @@ export class Supervisor extends BaseRunner {
       await sleep(1000);
 
       if (await this.workersAreActive()) {
-        console.log('Workers are active');
+        // Only log every 5s to reduce noise
+        if (timeLeft % 5 === 0) {
+          console.log('[ci-queue] Workers are active, waiting for them to complete.');
+        }
         timeLeftWithNoWorkers = this.config.inactiveWorkersTimeout;
       } else {
         timeLeftWithNoWorkers -= 1;
@@ -36,12 +39,12 @@ export class Supervisor extends BaseRunner {
     }
 
     if (timeLeftWithNoWorkers <= 0) {
-      console.log('Aborting, it seems all workers died.');
+      console.log('[ci-queue] Aborting, it seems all workers died.');
     }
 
     const isExhausted = await this.isExhausted();
     if (!isExhausted) {
-      console.log('Not all tests have finished in time');
+      console.log('[ci-queue] Not all tests have finished in time');
       return false;
     }
 

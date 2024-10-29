@@ -10,6 +10,7 @@ export class Worker extends BaseRunner {
   }
 
   async *pollIter() {
+    let lastLogTime = 0;
     await this.waitForMaster();
     while (
       !this.shutdownRequired &&
@@ -17,11 +18,16 @@ export class Worker extends BaseRunner {
       !(await this.maxTestsFailed())
     ) {
       const test = await this.reserveTest();
-      console.log(`Reserved test: ${test}`);
       if (test) {
+        console.log(`[ci-queue] Reserved test: ${test}`);
         yield test;
       } else {
-        console.log('Sleeping for 0.5 seconds');
+        const now = Date.now() / 1000;
+        // Only log every 5s to reduce noise
+        if (now - lastLogTime > 5) {
+          console.log('[ci-queue] No test to reserve, sleeping');
+          lastLogTime = now;
+        }
         await sleep(500);
       }
     }
@@ -107,7 +113,7 @@ export class Worker extends BaseRunner {
   private async reserveTest(): Promise<string | undefined | null> {
     if (this.currentlyReservedTest) {
       console.error(
-        `Currently reserved test found for worker ${this.config.workerId}:`,
+        `[ci-queue] Currently reserved test found for worker ${this.config.workerId}:`,
         this.currentlyReservedTest,
       );
       throw new Error(
