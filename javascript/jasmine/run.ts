@@ -51,7 +51,7 @@ async function run() {
 
     if (!requeued && failed) {
       console.log('Test failed');
-      await queue.incFailedTestCount();
+      await queue.recordFailedTest(test, "Suite");
     }
   }
   await queue.disconnect();
