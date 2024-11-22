@@ -332,6 +332,7 @@ export declare class BaseRunner {
     recordFailedTest(testName: string, testSuite: string): Promise<void>;
     recordPassingTest(testName: string, testSuite: string): Promise<void>;
     getFailedTests(): Promise<string>;
+    getFailedTestNamesFromPreviousBuild(): Promise<string[]>;
     waitForMaster(): Promise<void>;
     getMasterStatus(): Promise<string | null>;
     isInitialized(): Promise<boolean>;
@@ -339,5 +340,6 @@ export declare class BaseRunner {
     progress(): Promise<number>;
     toArray(): Promise<string[]>;
     key(...args: string[]): string;
+    retriedBuildKey(...args: string[]): string;
     private createRedisScripts;
 }

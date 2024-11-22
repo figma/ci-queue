@@ -61,10 +61,18 @@ class Worker extends BaseRunner_1.BaseRunner {
         await this.client.release(this.key('running'), this.key('worker', this.config.workerId, 'queue'), this.key('owners'));
     }
     async populate(tests, seed) {
-        if (seed !== undefined) {
-            tests = (0, utils_1.shuffleArray)(tests, seed);
+        if (this.config.retriedBuildId) {
+            console.log(`[ci-queue] Retrying failed tests for build ${this.config.retriedBuildId}`);
+            const failedTests = await this.getFailedTestNamesFromPreviousBuild();
+            console.log(`[ci-queue] Failed tests: ${failedTests}`);
+            await this.push(failedTests);
         }
-        await this.push(tests);
+        else {
+            if (seed !== undefined) {
+                tests = (0, utils_1.shuffleArray)(tests, seed);
+            }
+            await this.push(tests);
+        }
     }
     shutdown() {
         this.shutdownRequired = true;

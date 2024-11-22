@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Configuration = void 0;
 class Configuration {
-    constructor({ buildId, workerId, seed, redisTTL, maxRequeues, requeueTolerance, maxTestsAllowedToFail, timeout, reportTimeout, inactiveWorkersTimeout, namespace, failureFile, }) {
+    constructor({ buildId, workerId, seed, redisTTL, maxRequeues, requeueTolerance, maxTestsAllowedToFail, timeout, reportTimeout, inactiveWorkersTimeout, namespace, failureFile, retriedBuildId, }) {
         this.buildId = buildId;
         this.workerId = workerId;
         this.seed = seed;
@@ -15,6 +15,7 @@ class Configuration {
         this.inactiveWorkersTimeout = inactiveWorkersTimeout ?? this.timeout;
         this.namespace = namespace;
         this.failureFile = failureFile;
+        this.retriedBuildId = retriedBuildId;
     }
     static fromEnv() {
         const buildId = process.env['CIRCLE_BUILD_URL'] ||
