@@ -11,6 +11,7 @@ export type InitConfig = {
     inactiveWorkersTimeout?: number;
     namespace?: string;
     failureFile?: string;
+    retriedBuildId?: string;
 };
 export declare class Configuration {
     buildId: string;
@@ -25,7 +26,8 @@ export declare class Configuration {
     inactiveWorkersTimeout: number;
     namespace?: string;
     failureFile?: string;
-    constructor({ buildId, workerId, seed, redisTTL, maxRequeues, requeueTolerance, maxTestsAllowedToFail, timeout, reportTimeout, inactiveWorkersTimeout, namespace, failureFile, }: {
+    retriedBuildId?: string;
+    constructor({ buildId, workerId, seed, redisTTL, maxRequeues, requeueTolerance, maxTestsAllowedToFail, timeout, reportTimeout, inactiveWorkersTimeout, namespace, failureFile, retriedBuildId, }: {
         buildId: string;
         workerId: string;
         seed?: string;
@@ -38,6 +40,7 @@ export declare class Configuration {
         inactiveWorkersTimeout?: number;
         namespace?: string;
         failureFile?: string;
+        retriedBuildId?: string;
     });
     static fromEnv(): any;
     globalMaxRequeues(testCount: number): number;

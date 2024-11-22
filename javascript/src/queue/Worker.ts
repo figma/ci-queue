@@ -92,10 +92,17 @@ export class Worker extends BaseRunner {
   }
 
   async populate(tests: string[], seed?: number) {
-    if (seed !== undefined) {
-      tests = shuffleArray(tests, seed);
-    }
-    await this.push(tests);
+    if (this.config.retriedBuildId) {
+      console.log(`[ci-queue] Retrying failed tests for build ${this.config.retriedBuildId}`);
+      const failedTests = await this.getFailedTestNamesFromPreviousBuild();
+      console.log(`[ci-queue] Failed tests: ${failedTests}`);
+      await this.push(failedTests);
+    } else {
+      if (seed !== undefined) {
+        tests = shuffleArray(tests, seed);
+      }
+      await this.push(tests);
+    } 
   }
 
   shutdown() {

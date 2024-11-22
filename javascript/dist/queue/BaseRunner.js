@@ -58,6 +58,15 @@ class BaseRunner {
         const failures = Object.values(failedTests).map(test => JSON.parse(test));
         return JSON.stringify(failures);
     }
+    async getFailedTestNamesFromPreviousBuild() {
+        const previousBuildId = this.config.retriedBuildId;
+        if (!previousBuildId) {
+            return [];
+        }
+        const failedTests = await this.client.hGetAll(this.retriedBuildKey('error-reports'));
+        const failures = Object.values(failedTests).map(test => JSON.parse(test).test_name);
+        return failures;
+    }
     async waitForMaster() {
         if (this.isMaster) {
             return;
@@ -113,6 +122,13 @@ class BaseRunner {
             args = [args];
         }
         const uniqueID = this.config.namespace ? `${this.config.namespace}:#${this.config.buildId}` : this.config.buildId;
+        return ['build', uniqueID, ...args].join(':');
+    }
+    retriedBuildKey(...args) {
+        if (!Array.isArray(args)) {
+            args = [args];
+        }
+        const uniqueID = this.config.namespace ? `${this.config.namespace}:#${this.config.retriedBuildId}` : this.config.retriedBuildId;
         return ['build', uniqueID, ...args].join(':');
     }
     createRedisScripts() {
