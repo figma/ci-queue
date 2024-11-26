@@ -329,10 +329,10 @@ export declare class BaseRunner {
     isExpired(): Promise<boolean>;
     maxTestsFailed(): Promise<boolean>;
     testFailedCount(): Promise<string | null>;
-    recordFailedTest(testName: string, testSuite: string): Promise<void>;
+    recordFailedTest(testName: string, testGroup: string, testSuite: string): Promise<void>;
     recordPassingTest(testName: string, testSuite: string): Promise<void>;
     getFailedTests(): Promise<string>;
-    getFailedTestNamesFromPreviousBuild(): Promise<string[]>;
+    getFailedTestGroupsFromPreviousBuild(): Promise<string[]>;
     waitForMaster(): Promise<void>;
     getMasterStatus(): Promise<string | null>;
     isInitialized(): Promise<boolean>;

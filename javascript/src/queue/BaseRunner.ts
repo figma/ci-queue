@@ -50,9 +50,9 @@ export class BaseRunner {
     return await this.client.get(this.key('test_failed_count'));
   }
 
-  async recordFailedTest(testName: string, testSuite: string): Promise<void> {
+  async recordFailedTest(testName: string, testGroup: string, testSuite: string): Promise<void> {
     const fullTestName = `${testName}:${testSuite}`;
-    const payload = JSON.stringify({ test_name: testName, test_suite: testSuite });
+    const payload = JSON.stringify({ test_name: testName, test_suite: testSuite, test_group: testGroup });
     await this.client.hSet(
       this.key('error-reports'),
       Buffer.from(fullTestName).toString('binary'),
@@ -75,16 +75,16 @@ export class BaseRunner {
     return JSON.stringify(failures);
   }
 
-  async getFailedTestNamesFromPreviousBuild(): Promise<string[]> {
+  async getFailedTestGroupsFromPreviousBuild(): Promise<string[]> {
     const previousBuildId = this.config.retriedBuildId;
     if (!previousBuildId) {
       return [];
     }
 
     const failedTests = await this.client.hGetAll(this.retriedBuildKey('error-reports'));
-    const failures = Object.values(failedTests).map(test => JSON.parse(test).test_name);
+    const failedTestGroups = Object.values(failedTests).map(test => JSON.parse(test).test_group);
 
-    return failures;
+    return failedTestGroups;
   }
 
   async waitForMaster(): Promise<void> {
