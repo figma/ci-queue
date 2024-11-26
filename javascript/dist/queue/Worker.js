@@ -63,9 +63,9 @@ class Worker extends BaseRunner_1.BaseRunner {
     async populate(tests, seed) {
         if (this.config.retriedBuildId) {
             console.log(`[ci-queue] Retrying failed tests for build ${this.config.retriedBuildId}`);
-            const failedTests = await this.getFailedTestNamesFromPreviousBuild();
-            console.log(`[ci-queue] Failed tests: ${failedTests}`);
-            await this.push(failedTests);
+            const failedTestGroups = await this.getFailedTestGroupsFromPreviousBuild();
+            console.log(`[ci-queue] Failed test groups: ${failedTestGroups}`);
+            await this.push(failedTestGroups);
         }
         else {
             if (seed !== undefined) {

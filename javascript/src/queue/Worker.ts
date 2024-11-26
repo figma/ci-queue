@@ -94,9 +94,9 @@ export class Worker extends BaseRunner {
   async populate(tests: string[], seed?: number) {
     if (this.config.retriedBuildId) {
       console.log(`[ci-queue] Retrying failed tests for build ${this.config.retriedBuildId}`);
-      const failedTests = await this.getFailedTestNamesFromPreviousBuild();
-      console.log(`[ci-queue] Failed tests: ${failedTests}`);
-      await this.push(failedTests);
+      const failedTestGroups = await this.getFailedTestGroupsFromPreviousBuild();
+      console.log(`[ci-queue] Failed test groups: ${failedTestGroups}`);
+      await this.push(failedTestGroups);
     } else {
       if (seed !== undefined) {
         tests = shuffleArray(tests, seed);

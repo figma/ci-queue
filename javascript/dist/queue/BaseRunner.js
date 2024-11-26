@@ -41,9 +41,9 @@ class BaseRunner {
     async testFailedCount() {
         return await this.client.get(this.key('test_failed_count'));
     }
-    async recordFailedTest(testName, testSuite) {
+    async recordFailedTest(testName, testGroup, testSuite) {
         const fullTestName = `${testName}:${testSuite}`;
-        const payload = JSON.stringify({ test_name: testName, test_suite: testSuite });
+        const payload = JSON.stringify({ test_name: testName, test_suite: testSuite, test_group: testGroup });
         await this.client.hSet(this.key('error-reports'), Buffer.from(fullTestName).toString('binary'), Buffer.from(payload).toString('binary'));
         await this.client.expire(this.key('error-reports'), this.config.redisTTL);
         console.log(`[ci-queue] Incrementing failed test count for ${testName}`);
@@ -58,14 +58,14 @@ class BaseRunner {
         const failures = Object.values(failedTests).map(test => JSON.parse(test));
         return JSON.stringify(failures);
     }
-    async getFailedTestNamesFromPreviousBuild() {
+    async getFailedTestGroupsFromPreviousBuild() {
         const previousBuildId = this.config.retriedBuildId;
         if (!previousBuildId) {
             return [];
         }
         const failedTests = await this.client.hGetAll(this.retriedBuildKey('error-reports'));
-        const failures = Object.values(failedTests).map(test => JSON.parse(test).test_name);
-        return failures;
+        const failedTestGroups = Object.values(failedTests).map(test => JSON.parse(test).test_group);
+        return failedTestGroups;
     }
     async waitForMaster() {
         if (this.isMaster) {
