@@ -106,6 +106,7 @@ export class Worker extends BaseRunner {
         console.log('[ci-queue] Continuing with original tests');
       }
     }
+    console.log(`[ci-queue] Populating tests`);
 
     if (seed !== undefined) {
       tests = shuffleArray(tests, seed);

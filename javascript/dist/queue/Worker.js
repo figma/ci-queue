@@ -76,6 +76,7 @@ class Worker extends BaseRunner_1.BaseRunner {
                 console.log('[ci-queue] Continuing with original tests');
             }
         }
+        console.log(`[ci-queue] Populating tests`);
         if (seed !== undefined) {
             tests = (0, utils_1.shuffleArray)(tests, seed);
         }

@@ -82,6 +82,7 @@ export class BaseRunner {
     }
 
     const failedTests = await this.client.hGetAll(this.retriedBuildKey('error-reports'));
+    console.log(`[ci-queue] Failed tests`, failedTests);
     const failedTestGroups = Object.values(failedTests).map(test => JSON.parse(test).test_group);
 
     return failedTestGroups;
