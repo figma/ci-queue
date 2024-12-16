@@ -64,15 +64,20 @@ class Worker extends BaseRunner_1.BaseRunner {
         if (this.config.retriedBuildId) {
             console.log(`[ci-queue] Retrying failed tests for build ${this.config.retriedBuildId}`);
             const failedTestGroups = await this.getFailedTestGroupsFromPreviousBuild();
+            if (failedTestGroups.length === 0) {
+                console.log(`[ci-queue] No failed tests found for build ${this.config.retriedBuildId}`);
+                return false;
+            }
             console.log(`[ci-queue] Failed test groups: ${failedTestGroups}`);
             await this.push(failedTestGroups);
-            return;
+            return true;
         }
         console.log(`[ci-queue] Populating tests`);
         if (seed !== undefined) {
             tests = (0, utils_1.shuffleArray)(tests, seed);
         }
         await this.push(tests);
+        return true;
     }
     shutdown() {
         this.shutdownRequired = true;

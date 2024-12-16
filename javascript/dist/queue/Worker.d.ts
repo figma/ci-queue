@@ -9,7 +9,7 @@ export declare class Worker extends BaseRunner {
     acknowledge(test: string): Promise<boolean>;
     requeue(test: string, offset?: number): Promise<boolean>;
     release(): Promise<void>;
-    populate(tests: string[], seed?: number): Promise<void>;
+    populate(tests: string[], seed?: number): Promise<boolean>;
     shutdown(): void;
     private throwOnMismatchingTest;
     private reserveTest;
