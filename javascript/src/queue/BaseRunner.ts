@@ -81,11 +81,16 @@ export class BaseRunner {
       return [];
     }
 
-    const failedTests = await this.client.hGetAll(this.retriedBuildKey('error-reports'));
-    console.log(`[ci-queue] Failed tests`, failedTests);
-    const failedTestGroups = Object.values(failedTests).map(test => JSON.parse(test).test_group);
-
-    return failedTestGroups;
+    try {
+      const failedTests = await this.client.hGetAll(this.retriedBuildKey('error-reports'));
+      console.log(`[ci-queue] Failed tests`, failedTests);
+      const failedTestGroups = Object.values(failedTests).map(test => JSON.parse(test).test_group);
+      return failedTestGroups;
+    } catch (e) {
+      // If the previous build is still in-progress, there may not be any failed tests
+      console.error('[ci-queue] Failed to get failed test groups from previous build', e);
+      return [];
+    }
   }
 
   async waitForMaster(): Promise<void> {
