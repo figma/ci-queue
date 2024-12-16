@@ -91,13 +91,17 @@ export class Worker extends BaseRunner {
     );
   }
 
-  async populate(tests: string[], seed?: number) {
+  async populate(tests: string[], seed?: number): Promise<boolean> {
     if (this.config.retriedBuildId) {
       console.log(`[ci-queue] Retrying failed tests for build ${this.config.retriedBuildId}`);
       const failedTestGroups = await this.getFailedTestGroupsFromPreviousBuild();
+      if (failedTestGroups.length === 0) {
+        console.log(`[ci-queue] No failed tests found for build ${this.config.retriedBuildId}`);
+        return false;
+      }
       console.log(`[ci-queue] Failed test groups: ${failedTestGroups}`);
       await this.push(failedTestGroups);
-      return;
+      return true;
     }
 
     console.log(`[ci-queue] Populating tests`);
@@ -105,6 +109,7 @@ export class Worker extends BaseRunner {
       tests = shuffleArray(tests, seed);
     }
     await this.push(tests);
+    return true;
   }
 
   shutdown() {
