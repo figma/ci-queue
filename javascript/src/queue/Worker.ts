@@ -22,6 +22,12 @@ export class Worker extends BaseRunner {
         console.log(`[ci-queue] Reserved test: ${test}`);
         yield test;
       } else {
+        const shouldShutdownEarly = await this.shouldShutdownEarly();
+        if (shouldShutdownEarly) {
+          console.log(`[ci-queue] No more tests to pick up for now, will shutdown early`);
+          break;
+        }
+
         const now = Date.now() / 1000;
         // Only log every 5s to reduce noise
         if (now - lastLogTime > 5) {
@@ -179,5 +185,20 @@ export class Worker extends BaseRunner {
     }
     await this.client.sAdd(this.key('workers'), [this.config.workerId]);
     await this.client.expire(this.key('workers'), this.config.redisTTL);
+  }
+
+  private async shouldShutdownEarly() {
+    const totalWorkers = await this.client.sMembers(this.key('workers'));
+    const totalWorkersCount = totalWorkers.length;
+    console.log("[ci-queue] Total workers count: ", totalWorkersCount);
+
+    const stayRunningThreshold = Math.min(Math.floor(totalWorkersCount * 0.4), 1);
+    console.log("[ci-queue] Threshold for early shutdown: ", stayRunningThreshold);
+
+    const parallelJob = parseInt(this.config.workerId, 10);
+    const shouldShutdownEarly = parallelJob > stayRunningThreshold;
+    console.log("[ci-queue] Parallel job: ", parallelJob, "Should shutdown early: ", shouldShutdownEarly);
+
+    return shouldShutdownEarly;
   }
 }
