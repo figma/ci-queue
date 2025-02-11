@@ -192,7 +192,8 @@ export class Worker extends BaseRunner {
     const totalWorkersCount = totalWorkers.length;
     console.log("[ci-queue] Total workers count: ", totalWorkersCount);
 
-    const stayRunningThreshold = Math.min(Math.floor(totalWorkersCount * 0.4), 1);
+    // Only keep 20% of workers running
+    const stayRunningThreshold = Math.max(Math.floor(totalWorkersCount * 0.2), 1);
     console.log("[ci-queue] Threshold for early shutdown: ", stayRunningThreshold);
 
     const parallelJob = parseInt(this.config.workerId, 10);
