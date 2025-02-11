@@ -16,4 +16,5 @@ export declare class Worker extends BaseRunner {
     private tryToReserveTest;
     private tryToReserveLostTest;
     private push;
+    private shouldShutdownEarly;
 }
