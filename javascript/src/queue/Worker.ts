@@ -190,15 +190,11 @@ export class Worker extends BaseRunner {
   private async shouldShutdownEarly() {
     const totalWorkers = await this.client.sMembers(this.key('workers'));
     const totalWorkersCount = totalWorkers.length;
-    console.log("[ci-queue] Total workers count: ", totalWorkersCount);
 
     // Only keep 20% of workers running
     const stayRunningThreshold = Math.max(Math.floor(totalWorkersCount * 0.2), 1);
-    console.log("[ci-queue] Threshold for early shutdown: ", stayRunningThreshold);
-
     const parallelJob = parseInt(this.config.workerId, 10);
     const shouldShutdownEarly = parallelJob > stayRunningThreshold;
-    console.log("[ci-queue] Parallel job: ", parallelJob, "Should shutdown early: ", shouldShutdownEarly);
 
     return shouldShutdownEarly;
   }
