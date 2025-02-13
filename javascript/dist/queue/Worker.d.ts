@@ -1,5 +1,6 @@
 import { BaseRunner } from './BaseRunner';
 import { Configuration } from './Configuration';
+import { TestSpec } from './Test';
 export declare class Worker extends BaseRunner {
     private shutdownRequired;
     private currentlyReservedTest;
@@ -9,7 +10,7 @@ export declare class Worker extends BaseRunner {
     acknowledge(test: string): Promise<boolean>;
     requeue(test: string, offset?: number): Promise<boolean>;
     release(): Promise<void>;
-    populate(tests: string[], seed?: number): Promise<boolean>;
+    populate(tests: TestSpec[], seed?: number): Promise<boolean>;
     shutdown(): void;
     private throwOnMismatchingTest;
     private reserveTest;
