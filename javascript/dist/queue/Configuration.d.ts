@@ -27,7 +27,8 @@ export declare class Configuration {
     namespace?: string;
     failureFile?: string;
     retriedBuildId?: string;
-    constructor({ buildId, workerId, seed, redisTTL, maxRequeues, requeueTolerance, maxTestsAllowedToFail, timeout, reportTimeout, inactiveWorkersTimeout, namespace, failureFile, retriedBuildId, }: {
+    useDynamicDeadline?: boolean;
+    constructor({ buildId, workerId, seed, redisTTL, maxRequeues, requeueTolerance, maxTestsAllowedToFail, timeout, reportTimeout, inactiveWorkersTimeout, namespace, failureFile, retriedBuildId, useDynamicDeadline, }: {
         buildId: string;
         workerId: string;
         seed?: string;
@@ -41,6 +42,7 @@ export declare class Configuration {
         namespace?: string;
         failureFile?: string;
         retriedBuildId?: string;
+        useDynamicDeadline?: boolean;
     });
     static fromEnv(): any;
     globalMaxRequeues(testCount: number): number;

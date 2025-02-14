@@ -12,6 +12,9 @@ class BaseRunner {
         this.client = (0, redis_1.createClient)({ url: redisUrl, scripts: this.createRedisScripts() });
         this.config = config;
     }
+    useDynamicDeadline() {
+        return Boolean(this.config.useDynamicDeadline);
+    }
     async connect() {
         try {
             await this.client.connect();
@@ -127,6 +130,9 @@ class BaseRunner {
             .flatMap((t) => t)
             .reverse();
     }
+    testGroupTimeoutKey() {
+        return this.key('test_group_timeouts');
+    }
     key(...args) {
         if (!Array.isArray(args)) {
             args = [args];
@@ -176,16 +182,18 @@ class BaseRunner {
                 },
             }),
             reserve: (0, redis_1.defineScript)({
-                NUMBER_OF_KEYS: 5,
+                NUMBER_OF_KEYS: 6,
                 SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../../redis/reserve.lua`).toString(),
-                transformArguments(queueKey, setKey, processedKey, workerQueueKey, ownersKey, currentTime) {
+                transformArguments(queueKey, setKey, processedKey, workerQueueKey, ownersKey, testGroupTimeoutKey, currentTime, useDynamicDeadline) {
                     return [
                         queueKey,
                         setKey,
                         processedKey,
                         workerQueueKey,
                         ownersKey,
+                        testGroupTimeoutKey,
                         currentTime.toString(),
+                        useDynamicDeadline.toString(),
                     ];
                 },
                 transformReply(reply) {
@@ -193,16 +201,18 @@ class BaseRunner {
                 },
             }),
             reserveLost: (0, redis_1.defineScript)({
-                NUMBER_OF_KEYS: 4,
+                NUMBER_OF_KEYS: 5,
                 SCRIPT: (0, node_fs_1.readFileSync)(`${__dirname}/../../../redis/reserve_lost.lua`).toString(),
-                transformArguments(setKey, completedKey, workerQueueKey, ownersKey, currentTime, timeout) {
+                transformArguments(setKey, completedKey, workerQueueKey, ownersKey, testGroupTimeoutKey, currentTime, timeout, useDynamicDeadline) {
                     return [
                         setKey,
                         completedKey,
                         workerQueueKey,
                         ownersKey,
+                        testGroupTimeoutKey,
                         currentTime.toString(),
                         timeout.toString(),
+                        useDynamicDeadline.toString(),
                     ];
                 },
                 transformReply(reply) {
