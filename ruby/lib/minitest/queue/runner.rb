@@ -315,7 +315,7 @@ module Minitest
 
       attr_reader :queue_config, :options, :command, :argv
       attr_writer :queue_url
-      attr_accessor :queue, :grind_list, :grind_count, :load_paths, :verbose
+      attr_accessor :queue, :grind_list, :grind_count, :load_paths, :verbose, :test_globs
 
       def require_worker_id!
         if queue.distributed?
@@ -361,7 +361,19 @@ module Minitest
         end
       end
 
+      def load_test_globs
+        return unless test_globs
+
+        files_to_load = test_globs.reduce([]) do |files, pattern|
+          files + Dir.glob(pattern)
+        end
+        files_to_load.sort.each do |f|
+          require File.expand_path(f)
+        end
+      end
+
       def load_tests
+        load_test_globs
         argv.sort.each do |f|
           require File.expand_path(f)
         end
@@ -617,6 +629,13 @@ module Minitest
           EOS
           opts.on("--heartbeat [SECONDS]", Integer, help) do |time|
             queue_config.max_missed_heartbeat_seconds = time || 30
+          end
+
+          help = <<~EOS
+            Defines a list of globs to load
+          EOS
+          opts.on('--load-globs TEST_GLOBS', Array, help) do |test_globs|
+            self.test_globs = test_globs
           end
 
 
