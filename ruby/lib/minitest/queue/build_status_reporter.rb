@@ -21,16 +21,33 @@ module Minitest
         build.flaky_reports
       end
 
+      def requeued_tests
+        build.requeued_tests
+      end
+
       def report
         puts aggregates
         errors = error_reports
         puts errors
 
+        requeued_tests.to_a.sort.each do |test_id, count|
+          puts yellow("REQUEUE")
+          puts "#{test_id} (requeued #{count} times)"
+          puts ""
+        end
+
+        build.worker_errors.to_a.sort.each do |worker_id, error|
+          puts red("Worker #{worker_id } crashed")
+          puts error
+          puts ""
+        end
+
         errors.empty?
       end
 
       def success?
-        build.error_reports.empty?
+        build.error_reports.empty? &&
+          build.worker_errors.empty?
       end
 
       def record(*)
@@ -63,6 +80,14 @@ module Minitest
 
       def progress
         build.progress
+      end
+
+      def write_failure_file(file)
+        File.write(file, error_reports.map(&:to_h).to_json)
+      end
+
+      def write_flaky_tests_file(file)
+        File.write(file, flaky_reports.to_json)
       end
 
       private

@@ -89,6 +89,17 @@ class CI::Queue::RedisTest < Minitest::Test
     assert_predicate second_worker, :exhausted?
   end
 
+  def test_monitor_boot_and_shutdown
+    @queue.config.max_missed_heartbeat_seconds = 1
+    @queue.boot_heartbeat_process!
+
+    status = @queue.stop_heartbeat!
+
+    assert_predicate status, :success?
+  ensure
+    @queue.config.max_missed_heartbeat_seconds = nil
+  end
+
   def test_timed_out_test_are_picked_up_by_other_workers
     second_queue = worker(2)
     acquired = false
@@ -247,6 +258,16 @@ class CI::Queue::RedisTest < Minitest::Test
         threads.each(&:kill)
       end
     end
+  end
+
+  def test_initialise_from_redis_uri
+    queue = CI::Queue.from_uri('redis://localhost:6379/0', config)
+    assert_instance_of CI::Queue::Redis::Worker, queue
+  end
+
+  def test_initialise_from_rediss_uri
+    queue = CI::Queue.from_uri('rediss://localhost:6379/0', config)
+    assert_instance_of CI::Queue::Redis::Worker, queue
   end
 
   private

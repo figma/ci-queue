@@ -19,6 +19,8 @@ Gem::Specification.new do |spec|
   spec.homepage      = 'https://github.com/Shopify/ci-queue'
   spec.license       = 'MIT'
 
+  spec.required_ruby_version = '>= 2.7'
+
   spec.files         = lua_scripts + `git ls-files -z`.split("\x0").reject do |f|
     f.match(%r{^(test|spec|features)/})
   end
@@ -28,6 +30,8 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
 
   spec.metadata['allowed_push_host'] = 'https://rubygems.org'
+
+  spec.add_runtime_dependency 'logger'
 
   spec.add_development_dependency 'bundler'
   spec.add_development_dependency 'rake'

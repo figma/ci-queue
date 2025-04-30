@@ -23,7 +23,7 @@ module CI
         record_stats(stats)
       end
 
-      def record_success(id, stats: nil)
+      def record_success(id, stats: nil, skip_flaky_record: false)
         error_reports.delete(id)
         record_stats(stats)
       end
@@ -34,6 +34,14 @@ module CI
 
       def reset_stats(stat_names)
         stat_names.each { |s| stats.delete(s) }
+      end
+
+      def report_worker_error(_); end
+
+      def reset_worker_error; end
+
+      def worker_errors
+        {}
       end
 
       private
