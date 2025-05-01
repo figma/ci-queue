@@ -29,6 +29,8 @@ run_tests: clean
 test: autopep8 run_tests
 
 install:
+	@echo "Python version: $(python_version_full)"
+	@echo "Python version major: $(python_version_major)"
 	pip install --ignore-installed six -e .[test]
 
 release:
