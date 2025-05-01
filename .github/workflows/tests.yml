@@ -50,10 +50,14 @@ jobs:
         run: |
           sudo add-apt-repository -y ppa:deadsnakes/ppa
           sudo apt-get -qq update
-          sudo apt-get install -y python${{ matrix.python }} python${{ matrix.python }}-distutils
-          sudo pip install autopep8
+          sudo apt-get install -y python${{ matrix.python }} python${{ matrix.python }}-distutils python${{ matrix.python }}-venv
       - name: Run Python tests
         run: |
+          python3 -v
+          python${{ matrix.python }} -m venv python/myenv
+          source python/myenv/bin/activate
+          python3 -v
+          python3 -m pip install autopep8
           bin/before-install
           bin/test
         env:

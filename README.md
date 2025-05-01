@@ -1,9 +1,10 @@
+# test
 # CI::Queue
 
 [![Gem Version](https://badge.fury.io/rb/ci-queue.svg)](https://rubygems.org/gems/ci-queue)
 [![Tests](https://github.com/Shopify/ci-queue/workflows/Tests/badge.svg?branch=master)](https://github.com/Shopify/ci-queue/actions?query=workflow%3ATests)
 
-Distribute tests over many workers using a queue. 
+Distribute tests over many workers using a queue.
 
 ## Why a queue?
 
@@ -48,4 +49,3 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/Shopif
 ## License
 
 The code is available as open source under the terms of the [MIT License](http://opensource.org/licenses/MIT).
-

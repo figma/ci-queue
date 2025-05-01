@@ -10,10 +10,12 @@ end
 case ENV['SUITE']
 when 'python'
   Dir.chdir('python/') do
-    run('sudo', 'pip', 'install', '-U', 'pip')
-    run('sudo', 'pip', 'install', 'setuptools==68.0.0')
-    run('pip', '--version')
-    run('sudo', 'make', 'install')
+    run('python3', '-m', 'pip', '--version')
+    run('python3', '-m', 'pip', 'install', '-U', 'pip')
+    run('python3', '-m', 'pip', 'install', 'setuptools==68.0.0')
+    run('python3', '-m', 'pip', '--version')
+    run('make', 'install')
+    run('ls', '-l', 'myenv/bin/')
   end
 when 'ruby'
 else
