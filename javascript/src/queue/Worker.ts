@@ -12,6 +12,7 @@ export class Worker extends BaseRunner {
 
   async *pollIter() {
     let lastLogTime = 0;
+    let lastHeartbeatTime = Date.now() / 1000;
     await this.waitForMaster();
     while (
       !this.shutdownRequired &&
@@ -34,6 +35,12 @@ export class Worker extends BaseRunner {
         if (now - lastLogTime > 5) {
           console.log('[ci-queue] No test to reserve, sleeping');
           lastLogTime = now;
+        }
+
+        // Log heartbeat every 5 minutes if this is the master process
+        if (this.isMaster && now - lastHeartbeatTime > 300) {
+          console.log('[ci-queue] Still working');
+          lastHeartbeatTime = now;
         }
         await sleep(500);
       }
