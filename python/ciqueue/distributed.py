@@ -70,11 +70,16 @@ class Worker(Base):
 
     def __iter__(self):
         def poll():
+            last_heartbeat_time = time.time()
             while not self.shutdown_required and len(self):  # pylint: disable=len-as-condition
                 test = self._reserve()
                 if test:
                     yield test.decode()
                 else:
+                    # Log heartbeat every 5 minutes if this is the master process
+                    if self.is_master and time.time() - last_heartbeat_time > 300:
+                        print('[ci-queue] Still working')
+                        last_heartbeat_time = time.time()
                     time.sleep(0.05)
 
         try:
