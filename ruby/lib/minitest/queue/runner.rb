@@ -49,7 +49,8 @@ module Minitest
 
       def run_command
         require_worker_id!
-        if queue.retrying? || retry?
+        # if it's an automatic job retry we should process the main queue
+        if manual_retry?
           if queue.expired?
             abort! "The test run is too old and can't be retried"
           end
@@ -63,7 +64,8 @@ module Minitest
           end
         end
 
-        queue.rescue_connection_errors { queue.created_at = Time.now.to_f }
+        queue.rescue_connection_errors { queue.created_at = CI::Queue.time_now.to_f }
+        queue.boot_heartbeat_process!
 
         set_load_path
         Minitest.queue = queue
@@ -85,8 +87,23 @@ module Minitest
         if queue.rescue_connection_errors { queue.exhausted? }
           puts green('All tests were ran already')
         else
-          load_tests
-          populate_queue
+          # If the job gets (automatically) retried and there are still workers running but not many tests left
+          # in the queue, we assume by the time the application is booted the queue is empty and it's faster to no-op.
+          if retry? && queue.rescue_connection_errors { queue.queue_initialized? }
+            remaining = queue.rescue_connection_errors { queue.remaining }.to_i
+            running = queue.rescue_connection_errors { queue.running }.to_i
+
+            puts "#{remaining} tests left and #{running} workers running."
+            if remaining <= running
+              puts green("Queue almost empty, exiting early...")
+            else
+              load_tests
+              populate_queue
+            end
+          else
+            load_tests
+            populate_queue
+          end
         end
 
         at_exit {
@@ -165,13 +182,20 @@ module Minitest
       def bisect_command
         invalid_usage! "Missing the FAILING_TEST argument." unless queue_config.failing_test
 
-        @queue = CI::Queue::Bisect.new(queue_url, queue_config)
-        Minitest.queue = queue
         set_load_path
         load_tests
+        @queue = CI::Queue::Bisect.new(queue_url, queue_config)
+        Minitest.queue = queue
         populate_queue
 
         step("Testing the failing test in isolation")
+        unless queue.failing_test_present?
+          puts reopen_previous_step
+          puts red("The failing test does not exist.")
+          File.write('log/test_order.log', "")
+          exit! 1
+        end
+
         unless run_tests_in_fork(queue.failing_test)
           puts reopen_previous_step
           puts red("The test fail when ran alone, no need to bisect.")
@@ -191,9 +215,15 @@ module Minitest
           puts
         end
 
+        if queue.suspects_left == 0
+          step(yellow("The failing test was the first test in the test order so there is nothing to bisect."))
+          File.write('log/test_order.log', "")
+          exit! 1
+        end
+
         failing_order = queue.candidates
         step("Final validation")
-        status = if run_tests_in_fork(failing_order)
+        if run_tests_in_fork(failing_order)
           step(yellow("The bisection was inconclusive, there might not be any leaky test here."))
           File.write('log/test_order.log', "")
           exit! 1
@@ -204,7 +234,7 @@ module Minitest
           command += argv
 
           puts
-          puts "cat <<EOF |\n#{failing_order.to_a.map(&:id).join("\n")}\nEOF\n#{command.join(' ')}"
+          puts "cat <<'EOF' |\n#{failing_order.to_a.map(&:id).join("\n")}\nEOF\n#{command.join(' ')}"
           puts
 
           File.write('log/test_order.log', failing_order.to_a.map(&:id).join("\n"))
@@ -223,11 +253,17 @@ module Minitest
 
         unless supervisor.wait_for_workers { display_warnings(supervisor.build) }
           unless supervisor.queue_initialized?
-            abort! "No master was elected. Did all workers crash?"
+            abort! "No master was elected. Did all workers crash?", 40
           end
 
           unless supervisor.exhausted?
+            reporter = BuildStatusReporter.new(build: supervisor.build)
+            reporter.report
+            reporter.write_failure_file(queue_config.failure_file) if queue_config.failure_file
+            reporter.write_flaky_tests_file(queue_config.export_flaky_tests_file) if queue_config.export_flaky_tests_file
+
             msg = "#{supervisor.size} tests weren't run."
+
             if supervisor.max_test_failed?
               puts('Encountered too many failed tests. Test run was ended early.')
               abort!(msg)
@@ -238,18 +274,10 @@ module Minitest
         end
 
         reporter = BuildStatusReporter.new(build: supervisor.build)
-
-        if queue_config.failure_file
-          failures = reporter.error_reports.map(&:to_h).to_json
-          File.write(queue_config.failure_file, failures)
-        end
-
-        if queue_config.export_flaky_tests_file
-          failures = reporter.flaky_reports.to_json
-          File.write(queue_config.export_flaky_tests_file, failures)
-        end
-
+        reporter.write_failure_file(queue_config.failure_file) if queue_config.failure_file
+        reporter.write_flaky_tests_file(queue_config.export_flaky_tests_file) if queue_config.export_flaky_tests_file
         reporter.report
+
         exit! reporter.success? ? 0 : 1
       end
 
@@ -286,7 +314,8 @@ module Minitest
       private
 
       attr_reader :queue_config, :options, :command, :argv
-      attr_accessor :queue, :queue_url, :grind_list, :grind_count, :load_paths, :verbose
+      attr_writer :queue_url
+      attr_accessor :queue, :grind_list, :grind_count, :load_paths, :verbose, :test_globs
 
       def require_worker_id!
         if queue.distributed?
@@ -296,17 +325,12 @@ module Minitest
       end
 
       def display_warnings(build)
-        build.pop_warnings.each do |type, attributes|
-          case type
-          when CI::Queue::Warnings::RESERVED_LOST_TEST
-            puts reopen_previous_step
-            puts yellow(
-              "[WARNING] #{attributes[:test]} was picked up by another worker because it didn't complete in the allocated #{attributes[:timeout]} seconds.\n" \
-              "You may want to either optimize this test or bump ci-queue timeout.\n" \
-              "It's also possible that the worker that was processing it was terminated without being able to report back.\n"
-            )
-          end
-        end
+        return unless queue_config.warnings_file
+
+        warnings = build.pop_warnings.map do |type, attributes|
+          attributes.merge(type: type)
+        end.compact
+        File.write(queue_config.warnings_file, warnings.to_json)
       end
 
       def run_tests_in_fork(queue)
@@ -322,10 +346,11 @@ module Minitest
 
       def reset_counters
         queue.build.reset_stats(BuildStatusRecorder::COUNTERS)
+        queue.build.reset_worker_error
       end
 
       def populate_queue
-        Minitest.queue.populate(Minitest.loaded_tests, random: ordering_seed, &:id)
+        Minitest.queue.populate(Minitest.loaded_tests, random: ordering_seed)
       end
 
       def set_load_path
@@ -336,7 +361,19 @@ module Minitest
         end
       end
 
+      def load_test_globs
+        return unless test_globs
+
+        files_to_load = test_globs.reduce([]) do |files, pattern|
+          files + Dir.glob(pattern)
+        end
+        files_to_load.sort.each do |f|
+          require File.expand_path(f)
+        end
+      end
+
       def load_tests
+        load_test_globs
         argv.sort.each do |f|
           require File.expand_path(f)
         end
@@ -527,6 +564,15 @@ module Minitest
           end
 
           help = <<~EOS
+            Defines a file where warnings during the execution are written to.
+            Defaults to disabled.
+          EOS
+          opts.separator ""
+          opts.on('--warnings-file FILE', help) do |file|
+            queue_config.warnings_file = file
+          end
+
+          help = <<~EOS
             Defines after how many consecutive failures the worker will be considered unhealthy and terminate itself.
             Defaults to disabled.
           EOS
@@ -576,8 +622,29 @@ module Minitest
             queue.config.redis_ttl = time
           end
 
+          help = <<~EOS
+            If heartbeat is enabled, a background process will periodically signal it's still processing
+            the current test. If the heartbeat stops for the specified amount of seconds,
+            the test will be requeued to another worker.
+          EOS
+          opts.on("--heartbeat [SECONDS]", Integer, help) do |time|
+            queue_config.max_missed_heartbeat_seconds = time || 30
+          end
+
+          help = <<~EOS
+            Defines a list of globs to load
+          EOS
+          opts.on('--load-globs TEST_GLOBS', Array, help) do |test_globs|
+            self.test_globs = test_globs
+          end
+
+
           opts.on("-v", "--verbose", "Verbose. Show progress processing files.") do
             self.verbose = true
+          end
+
+          opts.on("--debug-log FILE", "Path to debug log file for e.g. Redis instrumentation") do |path|
+            queue_config.debug_log = path
           end
 
           opts.separator ""
@@ -623,10 +690,16 @@ module Minitest
         super
       end
 
-      def abort!(message)
+      def abort!(message, exit_status=1)
         reopen_previous_step
         puts red(message)
-        exit! 1 # exit! is required to avoid minitest at_exit callback
+        exit! exit_status # exit! is required to avoid minitest at_exit callback
+      end
+
+      def manual_retry?
+        # this env variable only exists on Buildkite so we should default to manual for backward compatibility
+        (retry? || queue.retrying?) &&
+          ENV.fetch("BUILDKITE_RETRY_TYPE", "manual") == "manual"
       end
 
       def retry?

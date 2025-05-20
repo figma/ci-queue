@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 module CI
   module Queue
     module Redis
@@ -17,11 +18,13 @@ module CI
         end
 
         def wait_for_workers
-          wait_for_master(timeout: config.queue_init_timeout)
+          duration = measure do
+            wait_for_master(timeout: config.queue_init_timeout)
+          end
 
           yield if block_given?
 
-          time_left = config.report_timeout
+          time_left = config.report_timeout - duration.to_i
           time_left_with_no_workers = config.inactive_workers_timeout
           until exhausted? || time_left <= 0 || max_test_failed? || time_left_with_no_workers <= 0
             time_left -= 1
@@ -46,7 +49,7 @@ module CI
 
         def active_workers?
           # if there are running jobs we assume there are still agents active
-          redis.zrangebyscore(key('running'), Time.now.to_f - config.timeout, "+inf", limit: [0,1]).count > 0
+          redis.zrangebyscore(key('running'), CI::Queue.time_now.to_f - config.timeout, "+inf", limit: [0,1]).count > 0
         end
       end
     end

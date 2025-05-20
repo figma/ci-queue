@@ -107,6 +107,7 @@ module Minitest
   end
 
   module Queue
+    include ::CI::Queue::OutputHelpers
     attr_writer :run_command_formatter, :project_root
 
     def run_command_formatter
@@ -156,7 +157,7 @@ module Minitest
       end
 
       def id
-        @id ||= "#{@runnable}##{@method_name}"
+        @id ||= "#{@runnable}##{@method_name}".freeze
       end
 
       def <=>(other)
@@ -187,7 +188,7 @@ module Minitest
       private
 
       def current_timestamp
-        Time.now.to_i
+        CI::Queue.time_now.to_i
       end
     end
 
@@ -226,7 +227,10 @@ module Minitest
 
     def run_from_queue(reporter, *)
       queue.poll do |example|
-        result = example.run
+        result = queue.with_heartbeat(example.id) do
+          example.run
+        end
+
         failed = !(result.passed? || result.skipped?)
 
         if example.flaky?
@@ -244,21 +248,40 @@ module Minitest
           queue.report_success!
         end
 
-        requeued = false
         if failed && CI::Queue.requeueable?(result) && queue.requeue(example)
-          requeued = true
           result.requeue!
           reporter.record(result)
-        elsif queue.acknowledge(example) || !failed
+        elsif queue.acknowledge(example)
+          reporter.record(result)
+          queue.increment_test_failed if failed
+        elsif !failed
           # If the test was already acknowledged by another worker (we timed out)
           # Then we only record it if it is successful.
           reporter.record(result)
         end
-
-        if !requeued && failed
-          queue.increment_test_failed
-        end
       end
+      queue.stop_heartbeat!
+    rescue Errno::EPIPE
+      # This happens when the heartbeat process dies
+      reopen_previous_step
+      puts red("The heartbeat process died. This worker is exiting early.")
+      exit!(41)
+    rescue CI::Queue::Error
+      reopen_previous_step
+      puts red("#{error.class}: #{error.message}")
+      error.backtrace.each do |frame|
+        puts red(frame)
+      end
+      exit!(41)
+    rescue => error
+      reopen_previous_step
+      queue.report_worker_error(error)
+      puts red("This worker exited because of an uncaught application error:")
+      puts red("#{error.class}: #{error.message}")
+      error.backtrace.each do |frame|
+        puts red(frame)
+      end
+      exit!(42)
     end
   end
 end

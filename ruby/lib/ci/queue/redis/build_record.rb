@@ -17,8 +17,30 @@ module CI
           @queue.exhausted?
         end
 
+        def report_worker_error(error)
+          redis.pipelined do |pipeline|
+            pipeline.hset(key('worker-errors'), config.worker_id, error.message)
+            pipeline.expire(key('worker-errors'), config.redis_ttl)
+          end
+        end
+
+        def worker_errors
+          redis.hgetall(key('worker-errors'))
+        end
+
+        def reset_worker_error
+          redis.hdel(key('worker-errors'), config.worker_id)
+        end
+
         def failed_tests
           redis.hkeys(key('error-reports'))
+        end
+
+        TOTAL_KEY = "___total___"
+        def requeued_tests
+          requeues = redis.hgetall(key('requeues-count'))
+          requeues.delete(TOTAL_KEY)
+          requeues
         end
 
         def pop_warnings
@@ -47,13 +69,13 @@ module CI
           nil
         end
 
-        def record_success(id, stats: nil)
+        def record_success(id, stats: nil, skip_flaky_record: false)
           error_reports_deleted_count, requeued_count, _ = redis.pipelined do |pipeline|
             pipeline.hdel(key('error-reports'), id.dup.force_encoding(Encoding::BINARY))
             pipeline.hget(key('requeues-count'), id.b)
             record_stats(stats, pipeline: pipeline)
           end
-          record_flaky(id) if error_reports_deleted_count.to_i > 0 || requeued_count.to_i > 0
+          record_flaky(id) if !skip_flaky_record && (error_reports_deleted_count.to_i > 0 || requeued_count.to_i > 0)
           nil
         end
 

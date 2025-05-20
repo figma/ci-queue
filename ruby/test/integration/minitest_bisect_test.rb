@@ -89,7 +89,7 @@ module Integration
           LeakyTest#test_sensible_to_leak                                 FAIL
         +++ The following command should reproduce the leak on your machine:
 
-        cat <<EOF |
+        cat <<'EOF' |
         LeakyTest#test_introduce_leak
         LeakyTest#test_sensible_to_leak
         EOF
@@ -100,7 +100,7 @@ module Integration
       assert_equal expected_output, normalize(out)
     end
 
-    def test_unconclusive
+    def test_inconclusive
       out, err = capture_subprocess_io do
         run_bisect('log/unconclusive_test_order.log', 'LeakyTest#test_sensible_to_leak')
       end
@@ -172,6 +172,21 @@ module Integration
           LeakyTest#test_useless_43                                       PASS
           LeakyTest#test_sensible_to_leak                                 PASS
         --- The bisection was inconclusive, there might not be any leaky test here.
+      EOS
+
+      assert_equal expected_output, normalize(out)
+    end
+
+    def test_failing_test_is_the_first_entry_in_the_test_order
+      out, err = capture_subprocess_io do
+        run_bisect('log/unconclusive_test_order.log', 'LeakyTest#test_useless_0')
+      end
+
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
+        --- Testing the failing test in isolation
+          LeakyTest#test_useless_0                                        PASS
+        --- The failing test was the first test in the test order so there is nothing to bisect.
       EOS
 
       assert_equal expected_output, normalize(out)
@@ -266,6 +281,22 @@ module Integration
         ^^^ +++
 
         The test fail when ran alone, no need to bisect.
+      EOS
+
+      assert_equal expected_output, normalize(out)
+    end
+
+    def test_failing_test_is_not_present
+      out, err = capture_subprocess_io do
+        run_bisect('log/leaky_test_order.log', 'LeakyTestDoesNotExist#test_sensible_to_leak')
+      end
+
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
+        --- Testing the failing test in isolation
+        ^^^ +++
+
+        The failing test does not exist.
       EOS
 
       assert_equal expected_output, normalize(out)
