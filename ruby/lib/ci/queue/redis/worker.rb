@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 require 'ci/queue/static'
 require 'set'
+require 'ci/queue/output_helpers'
 
 module CI
   module Queue
@@ -51,13 +52,15 @@ module CI
         def poll
           wait_for_master
           last_heartbeat_time = Time.now
+          STDOUT.sync = true
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
             if test = reserve
               yield index.fetch(test)
             else
               # Log heartbeat every 5 minutes if this is the master process
               if master? && Time.now - last_heartbeat_time > 300
-                puts '[ci-queue] Still working'
+                STDOUT.puts '[ci-queue] Still working'
+                STDOUT.flush
                 last_heartbeat_time = Time.now
               end
               sleep 0.05
