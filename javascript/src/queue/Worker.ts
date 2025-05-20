@@ -1,7 +1,6 @@
 import { BaseRunner } from './BaseRunner';
 import { Configuration } from './Configuration';
 import { shuffleArray, sleep } from './utils';
-import { TestSpec } from './Test';
 
 export class Worker extends BaseRunner {
   private shutdownRequired: boolean = false;
@@ -98,7 +97,7 @@ export class Worker extends BaseRunner {
     );
   }
 
-  async populate(tests: TestSpec[], seed?: number): Promise<boolean> {
+  async populate(tests: string[], seed?: number): Promise<boolean> {
     if (this.config.retriedBuildId) {
       console.log(`[ci-queue] Retrying failed tests for build ${this.config.retriedBuildId}`);
       const failedTestGroups = await this.getFailedTestGroupsFromPreviousBuild();
@@ -107,17 +106,7 @@ export class Worker extends BaseRunner {
         return false;
       }
       console.log(`[ci-queue] Failed test groups: ${failedTestGroups}`);
-      const failedTestGroupTimeouts: TestSpec[] = []
-      for (const failedTestGroup of failedTestGroups) {
-        const testSpec = tests.find((test) => test.name === failedTestGroup)
-        if (testSpec) {
-          failedTestGroupTimeouts.push(testSpec)
-        } else {
-          console.log("Failed to find timeout for test group", failedTestGroup, ". defaulting to", this.config.timeout)
-          failedTestGroupTimeouts.push({ name: failedTestGroup, timeout: this.config.timeout })
-        }
-      }
-      await this.push(failedTestGroupTimeouts);
+      await this.push(failedTestGroups);
       return true;
     }
 
@@ -164,9 +153,7 @@ export class Worker extends BaseRunner {
       this.key('processed'),
       this.key('worker', this.config.workerId, 'queue'),
       this.key('owners'),
-      this.testGroupTimeoutKey(),
       Date.now() / 1000,
-      this.useDynamicDeadline(),
     );
   }
 
@@ -176,34 +163,24 @@ export class Worker extends BaseRunner {
       this.key('completed'),
       this.key('worker', this.config.workerId, 'queue'),
       this.key('owners'),
-      this.testGroupTimeoutKey(),
       Date.now() / 1000,
       this.config.timeout,
-      this.useDynamicDeadline(),
     );
     return lostTest;
   }
 
-  private async push(testSpecs: TestSpec[]) {
-    const tests = testSpecs.map((testSpec) => testSpec.name)
-    const testTimeoutMap: Record<string, number> = testSpecs.reduce((acc: Record<string, number>, testSpec: TestSpec) => {
-      acc[testSpec.name] = testSpec.timeout;
-      return acc;
-    }, {})
-
+  private async push(tests: any[]) {
     this.totalTestCount = tests.length;
     this.isMaster = await this.client.setNX(this.key('master-status'), 'setup');
     if (this.isMaster) {
       await this.client
         .multi()
         .lPush(this.key('queue'), tests)
-        .hSet(this.testGroupTimeoutKey(), testTimeoutMap)
         .set(this.key('total'), this.totalTestCount)
         .set(this.key('master-status'), 'ready')
         .expire(this.key('queue'), this.config.redisTTL)
         .expire(this.key('total'), this.config.redisTTL)
         .expire(this.key('master-status'), this.config.redisTTL)
-        .expire(this.testGroupTimeoutKey(), this.config.redisTTL)
         .exec();
     }
     await this.client.sAdd(this.key('workers'), [this.config.workerId]);

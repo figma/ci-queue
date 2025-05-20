@@ -28,7 +28,6 @@ export class Configuration {
   namespace?: string;
   failureFile?: string;
   retriedBuildId?: string;
-  useDynamicDeadline?: boolean;
   constructor({
     buildId,
     workerId,
@@ -43,7 +42,6 @@ export class Configuration {
     namespace,
     failureFile,
     retriedBuildId,
-    useDynamicDeadline,
   }: {
     buildId: string;
     workerId: string;
@@ -58,7 +56,6 @@ export class Configuration {
     namespace?: string;
     failureFile?: string;
     retriedBuildId?: string;
-    useDynamicDeadline?: boolean;
   }) {
     this.buildId = buildId;
     this.workerId = workerId;
@@ -73,7 +70,6 @@ export class Configuration {
     this.namespace = namespace;
     this.failureFile = failureFile;
     this.retriedBuildId = retriedBuildId;
-    this.useDynamicDeadline = useDynamicDeadline ?? false
   }
 
   static fromEnv() {

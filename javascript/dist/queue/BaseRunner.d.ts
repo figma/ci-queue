@@ -310,20 +310,19 @@ export declare class BaseRunner {
         reserve: {
             NUMBER_OF_KEYS: number;
             SCRIPT: string;
-            transformArguments(this: void, queueKey: string, setKey: string, processedKey: string, workerQueueKey: string, ownersKey: string, testGroupTimeoutKey: string, currentTime: number, useDynamicDeadline: boolean): string[];
+            transformArguments(this: void, queueKey: string, setKey: string, processedKey: string, workerQueueKey: string, ownersKey: string, currentTime: number): string[];
             transformReply(this: void, reply: string | null | undefined): string | null | undefined;
         } & import("@redis/client/dist/lib/lua-script").SHA1;
         reserveLost: {
             NUMBER_OF_KEYS: number;
             SCRIPT: string;
-            transformArguments(this: void, setKey: string, completedKey: string, workerQueueKey: string, ownersKey: string, testGroupTimeoutKey: string, currentTime: number, timeout: number, useDynamicDeadline: boolean): string[];
+            transformArguments(this: void, setKey: string, completedKey: string, workerQueueKey: string, ownersKey: string, currentTime: number, timeout: number): string[];
             transformReply(this: void, reply: string | null | undefined): string | null | undefined;
         } & import("@redis/client/dist/lib/lua-script").SHA1;
     }>;
     totalTestCount: number;
     private queueInitialized?;
     constructor(redisUrl: string, config: Configuration);
-    useDynamicDeadline(): boolean;
     connect(): Promise<void>;
     disconnect(): Promise<void>;
     isExhausted(): Promise<boolean>;
@@ -340,7 +339,6 @@ export declare class BaseRunner {
     size(): Promise<number>;
     progress(): Promise<number>;
     toArray(): Promise<string[]>;
-    testGroupTimeoutKey(): string;
     key(...args: string[]): string;
     retriedBuildKey(...args: string[]): string;
     private createRedisScripts;

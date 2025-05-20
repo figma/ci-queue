@@ -16,10 +16,6 @@ export class BaseRunner {
     this.config = config;
   }
 
-  useDynamicDeadline(): boolean {
-    return Boolean(this.config.useDynamicDeadline)
-  }
-
   async connect() {
     try {
       await this.client.connect();
@@ -62,7 +58,7 @@ export class BaseRunner {
       Buffer.from(fullTestName).toString('binary'),
       Buffer.from(payload).toString('binary')
     );
-
+  
     await this.client.expire(this.key('error-reports'), this.config.redisTTL);
     console.log(`[ci-queue] Incrementing failed test count for ${testName}`);
     await this.client.incr(this.key('test_failed_count'));
@@ -88,7 +84,7 @@ export class BaseRunner {
     try {
       const failedTests = await this.client.hGetAll(this.retriedBuildKey('error-reports'));
       console.log(`[ci-queue] Failed tests`, failedTests);
-      const failedTestGroups = Object.keys(failedTests).length > 0
+      const failedTestGroups = Object.keys(failedTests).length > 0 
         ? Object.values(failedTests).map(test => JSON.parse(test).test_group)
         : [];
       return failedTestGroups;
@@ -156,10 +152,6 @@ export class BaseRunner {
     )
       .flatMap((t) => t)
       .reverse() as string[];
-  }
-
-  testGroupTimeoutKey() {
-    return this.key('test_group_timeouts')
   }
 
   key(...args: string[]): string {
@@ -230,7 +222,7 @@ export class BaseRunner {
       }),
 
       reserve: defineScript({
-        NUMBER_OF_KEYS: 6,
+        NUMBER_OF_KEYS: 5,
         SCRIPT: readFileSync(`${__dirname}/../../../redis/reserve.lua`).toString(),
         transformArguments(
           queueKey: string,
@@ -238,9 +230,7 @@ export class BaseRunner {
           processedKey: string,
           workerQueueKey: string,
           ownersKey: string,
-          testGroupTimeoutKey: string,
           currentTime: number,
-          useDynamicDeadline: boolean,
         ) {
           return [
             queueKey,
@@ -248,9 +238,7 @@ export class BaseRunner {
             processedKey,
             workerQueueKey,
             ownersKey,
-            testGroupTimeoutKey,
             currentTime.toString(),
-            useDynamicDeadline.toString(),
           ];
         },
         transformReply(reply: string | null | undefined) {
@@ -258,27 +246,23 @@ export class BaseRunner {
         },
       }),
       reserveLost: defineScript({
-        NUMBER_OF_KEYS: 5,
+        NUMBER_OF_KEYS: 4,
         SCRIPT: readFileSync(`${__dirname}/../../../redis/reserve_lost.lua`).toString(),
         transformArguments(
           setKey: string,
           completedKey: string,
           workerQueueKey: string,
           ownersKey: string,
-          testGroupTimeoutKey: string,
           currentTime: number,
           timeout: number,
-          useDynamicDeadline: boolean
         ) {
           return [
             setKey,
             completedKey,
             workerQueueKey,
             ownersKey,
-            testGroupTimeoutKey,
             currentTime.toString(),
             timeout.toString(),
-            useDynamicDeadline.toString(),
           ];
         },
         transformReply(reply: string | null | undefined) {
