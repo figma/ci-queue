@@ -2,10 +2,9 @@
 # If you are an external contributor you don't have to bother with it.
 name: ci-queue
 
-up:
-- ruby: 2.6.5
-- bundler
-- isogun
-
-commands:
-  test: REDIS_URL=${REDIS_URL:-redis://ci-queue.railgun/0} bundle exec rake test TEST_FILES="$*"
+vm:
+  ip_address: 192.168.64.245
+  memory: 1G
+  cores: 2
+services:
+   - redis

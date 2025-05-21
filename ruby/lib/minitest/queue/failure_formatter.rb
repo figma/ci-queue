@@ -28,7 +28,7 @@ module Minitest
           test_and_module_name: "#{test.klass}##{test.name}",
           test_name: test.name,
           test_suite: test.klass,
-          error_class: test.failure.error.class.name,
+          error_class: test.failure.exception.class.name,
           output: to_s,
         }
       end
@@ -53,7 +53,7 @@ module Minitest
 
       def body
         error = test.failure
-        message = if error.is_a?(Minitest::UnexpectedError)
+        message = if error.is_a?(MiniTest::UnexpectedError)
           "#{error.exception.class}: #{error.exception.message}"
         else
           error.exception.message

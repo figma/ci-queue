@@ -1,4 +1,3 @@
-ATest#test_foo
-ATest#test_bar
-BTest#test_foo
-BTest#test_bar
+foo
+bar
+plop?fizz

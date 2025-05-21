@@ -14,8 +14,8 @@ require 'ci/queue/redis/test_time_record'
 module CI
   module Queue
     module Redis
-      LostMaster = Class.new(CI::Queue::Error)
-      ReservationError = Class.new(CI::Queue::Error)
+      Error = Class.new(StandardError)
+      LostMaster = Class.new(Error)
 
       class << self
 

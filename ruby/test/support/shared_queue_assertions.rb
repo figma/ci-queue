@@ -6,7 +6,7 @@ module SharedQueueAssertions
   include QueueHelper
 
   def setup
-    capture_io { @queue = populate(build_queue) }
+    @queue = populate(build_queue)
   end
 
   def test_progess
@@ -75,15 +75,6 @@ module SharedQueueAssertions
 
   def test_release
     @queue.release!
-  end
-
-  def test_shutdown
-    tests = []
-    @queue.poll do |test|
-      tests << test.id
-      @queue.shutdown!
-    end
-    assert_equal %w(ATest#test_foo), tests
   end
 
   private

@@ -5,6 +5,8 @@ require 'set'
 module CI
   module Queue
     module Redis
+      ReservationError = Class.new(StandardError)
+
       class << self
         attr_accessor :requeue_offset
       end
@@ -93,10 +95,6 @@ module CI
           @build ||= CI::Queue::Redis::BuildRecord.new(self, redis, config)
         end
 
-        def report_worker_error(error)
-          build.report_worker_error(error)
-        end
-
         def acknowledge(test)
           test_key = test.id
           raise_on_mismatching_test(test_key)
@@ -146,6 +144,10 @@ module CI
           config.worker_id
         end
 
+        def timeout
+          config.timeout
+        end
+
         def raise_on_mismatching_test(test)
           if @reserved_test == test
             @reserved_test = nil
@@ -173,13 +175,11 @@ module CI
               key('worker', worker_id, 'queue'),
               key('owners'),
             ],
-            argv: [CI::Queue.time_now.to_f],
+            argv: [Time.now.to_f],
           )
         end
 
         def try_to_reserve_lost_test
-          timeout = config.max_missed_heartbeat_seconds ? config.max_missed_heartbeat_seconds : config.timeout
-
           lost_test = eval_script(
             :reserve_lost,
             keys: [
@@ -188,11 +188,11 @@ module CI
               key('worker', worker_id, 'queue'),
               key('owners'),
             ],
-            argv: [CI::Queue.time_now.to_f, timeout],
+            argv: [Time.now.to_f, timeout],
           )
 
           if lost_test
-            build.record_warning(Warnings::RESERVED_LOST_TEST, test: lost_test, timeout: config.timeout)
+            build.record_warning(Warnings::RESERVED_LOST_TEST, test: lost_test, timeout: timeout)
           end
 
           lost_test
@@ -202,7 +202,6 @@ module CI
           @total = tests.size
 
           if @master = redis.setnx(key('master-status'), 'setup')
-            puts "Worker electected as leader, pushing #{@total} tests to the queue."
             redis.multi do |transaction|
               transaction.lpush(key('queue'), tests) unless tests.empty?
               transaction.set(key('total'), @total)
