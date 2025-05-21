@@ -16,7 +16,7 @@ when 'python'
     environment['TOX_ENV'] = tox_py_env
   end
   Dir.chdir('python/') do
-    run(environment, 'sudo', '--preserve-env', 'make', 'test')
+    run(environment, 'make', 'test')
   end
 when 'ruby'
   Dir.chdir('ruby/') do

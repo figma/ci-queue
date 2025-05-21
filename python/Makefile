@@ -1,7 +1,8 @@
 # Copyright (c) 2017 "Shopify inc." All rights reserved.
 # Use of this source code is governed by a MIT-style license that can be found in the LICENSE file.
+PYTHON ?= python3
 python_files := find . -path '*/.*' -prune -o -name '*.py' -print0
-python_version_full := $(wordlist 2,4,$(subst ., ,$(shell python --version 2>&1)))
+python_version_full := $(wordlist 2,4,$(subst ., ,$(shell $(PYTHON) --version 2>&1)))
 python_version_major := $(word 1,${python_version_full})
 
 TOX_ENV ?= py37,py38,py39,py310,py311
@@ -14,7 +15,7 @@ clean:
 
 autopep8:
 	@echo 'Auto Formatting...'
-	@$(python_files) | xargs -0 autopep8 --jobs 0 --in-place --aggressive --global-config setup.cfg
+	@$(python_files) | xargs -0 myenv/bin/autopep8 --jobs 0 --in-place --aggressive --global-config setup.cfg
 
 lint:
 	@echo 'Linting...'
@@ -29,11 +30,12 @@ run_tests: clean
 test: autopep8 run_tests
 
 install:
-	pip install --ignore-installed six -e .[test]
+	@$(PYTHON) -v
+	$(PYTHON) -m pip install --ignore-installed six -e .[test]
 
 release:
 	rm -rf build dist
-	@python setup.py sdist bdist_wheel
+	@$(PYTHON) setup.py sdist bdist_wheel
 
 upload_test: release
 	@twine upload dist/* -r testpypi
