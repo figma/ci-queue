@@ -202,35 +202,15 @@ module CI
           @total = tests.size
 
           if @master = redis.setnx(key('master-status'), 'setup')
-            puts "Worker electected as leader, pushing #{@total} tests to the queue."
-            puts
+            redis.multi do |transaction|
+              transaction.lpush(key('queue'), tests) unless tests.empty?
+              transaction.set(key('total'), @total)
+              transaction.set(key('master-status'), 'ready')
 
-            attempts = 0
-            duration = measure do
-              with_redis_timeout(5) do
-                redis.without_reconnect do
-                  redis.multi do |transaction|
-                    transaction.lpush(key('queue'), tests) unless tests.empty?
-                    transaction.set(key('total'), @total)
-                    transaction.set(key('master-status'), 'ready')
-
-                    transaction.expire(key('queue'), config.redis_ttl)
-                    transaction.expire(key('total'), config.redis_ttl)
-                    transaction.expire(key('master-status'), config.redis_ttl)
-                  end
-                end
-              rescue ::Redis::BaseError => error
-                if !queue_initialized? && attempts < 3
-                  puts "Retrying pushing #{@total} tests to the queue... (#{error})"
-                  attempts += 1
-                  retry
-                end
-
-                raise if !queue_initialized?
-              end
+              transaction.expire(key('queue'), config.redis_ttl)
+              transaction.expire(key('total'), config.redis_ttl)
+              transaction.expire(key('master-status'), config.redis_ttl)
             end
-
-            puts "Finished pushing #{@total} tests to the queue in #{duration.round(2)}s."
           end
           register
           redis.expire(key('workers'), config.redis_ttl)
