@@ -10,9 +10,14 @@ end
 case ENV['SUITE']
 when 'python'
   Dir.chdir('python/') do
-    run('sudo', 'pip', 'install', '-U', 'pip')
+    run('pip', '--version')
+    run('sudo', 'pip', '--version')
+    run('python', '-m', 'pip', 'install', '--upgrade', 'pip')
+    # run('sudo', 'pip', 'install', '-U', 'pip')
+    run('sudo', 'pip', 'install', 'autopep8')
     run('sudo', 'pip', 'install', 'setuptools==68.0.0')
     run('pip', '--version')
+    run('sudo', 'pip', '--version')
     run('sudo', 'make', 'install')
   end
 when 'ruby'
