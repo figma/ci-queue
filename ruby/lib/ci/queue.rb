@@ -2,7 +2,6 @@
 
 require 'uri'
 require 'cgi'
-require 'json'
 
 require 'ci/queue/version'
 require 'ci/queue/output_helpers'
@@ -21,19 +20,8 @@ module CI
 
     attr_accessor :shuffler, :requeueable
 
-    Error = Class.new(StandardError)
-
     module Warnings
       RESERVED_LOST_TEST = :RESERVED_LOST_TEST
-    end
-
-    GET_NOW = ::Time.method(:now)
-    private_constant :GET_NOW
-    def time_now
-      # Mocks like freeze_time should be cleaned when ci-queue runs, however,
-      # we experienced cases when tests were enqueued with wrong timestamps, so we
-      # safeguard Time.now here.
-      GET_NOW.call
     end
 
     def requeueable?(test_result)
@@ -55,7 +43,7 @@ module CI
         Static
       when 'file', nil
         File
-      when 'redis', 'rediss'
+      when 'redis'
         require 'ci/queue/redis'
         Redis
       else

@@ -15,142 +15,136 @@ module Integration
       File.delete(@order_path) if File.exist?(@order_path)
     end
 
-    # def test_redis_runner
-    #   out, err = capture_subprocess_io do
-    #     system(
-    #       { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
-    #       @exe,
-    #       '--queue', @redis_url,
-    #       '--seed', '123',
-    #       '--build', '1',
-    #       '--worker', '1',
-    #       '--timeout', '1',
-    #       '--max-requeues', '1',
-    #       '--requeue-tolerance', '1',
-    #       chdir: 'test/fixtures/',
-    #     )
-    #     assert_equal 0, $?.exitstatus
-    #   end
+    def test_redis_runner
+      out, err = capture_subprocess_io do
+        system(
+          { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          '--max-requeues', '1',
+          '--requeue-tolerance', '1',
+          chdir: 'test/fixtures/',
+        )
+        assert_equal 0, $?.exitstatus
+      end
 
-    #   assert_empty err
-    #   expected_output = strip_heredoc <<-EOS
-    #     Worker electected as leader, pushing 3 tests to the queue.
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
 
-    #     Finished pushing 3 tests to the queue in X.XXs.
+        Randomized with seed 123
+        ..*.
 
-    #     Randomized with seed 123
-    #     ..*.
+        Pending: (Failures listed here are expected and do not affect your suite's status)
 
-    #     Pending: (Failures listed here are expected and do not affect your suite's status)
+          1) Object doesn't work on first try
+             # The example failed, but another attempt will be done to rule out flakiness
 
-    #       1) Object doesn't work on first try
-    #          # The example failed, but another attempt will be done to rule out flakiness
+             Failure/Error: expect(1 + 1).to be == 42
 
-    #          Failure/Error: expect(1 + 1).to be == 42
+               expected: == 42
+                    got:    2
+             # ./spec/dummy_spec.rb:12:in `block (2 levels) in <top (required)>'
+             # ./spec/dummy_spec.rb:7
 
-    #            expected: == 42
-    #                 got:    2
-    #          # ./spec/dummy_spec.rb:12:in `block (2 levels) in <top (required)>'
-    #          # ./spec/dummy_spec.rb:7
+        Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
+        4 examples, 0 failures, 1 pending
 
-    #     Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
-    #     4 examples, 0 failures, 1 pending
+        Randomized with seed 123
 
-    #     Randomized with seed 123
+      EOS
 
-    #   EOS
-
-    #   assert_equal expected_output, normalize(out)
+      assert_equal expected_output, normalize(out)
 
 
-    #   expected_test_order = [
-    #     "./spec/dummy_spec.rb[1:1]\n",
-    #     "./spec/dummy_spec.rb[1:3:1]\n",
-    #     "./spec/dummy_spec.rb[1:2]\n",
-    #     "./spec/dummy_spec.rb[1:2]\n",
-    #   ]
+      expected_test_order = [
+        "./spec/dummy_spec.rb[1:1]\n",
+        "./spec/dummy_spec.rb[1:3:1]\n",
+        "./spec/dummy_spec.rb[1:2]\n",
+        "./spec/dummy_spec.rb[1:2]\n",
+      ]
 
-    #   assert_equal expected_test_order, File.read(@order_path).lines
-    # end
+      assert_equal expected_test_order, File.read(@order_path).lines
+    end
 
-    # def test_redis_runner_retry
-    #   out, err = capture_subprocess_io do
-    #     system(
-    #       { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
-    #       @exe,
-    #       '--queue', @redis_url,
-    #       '--seed', '123',
-    #       '--build', '1',
-    #       '--worker', '1',
-    #       '--timeout', '1',
-    #       '--max-requeues', '1',
-    #       '--requeue-tolerance', '1',
-    #       chdir: 'test/fixtures/',
-    #     )
-    #   end
+    def test_redis_runner_retry
+      out, err = capture_subprocess_io do
+        system(
+          { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          '--max-requeues', '1',
+          '--requeue-tolerance', '1',
+          chdir: 'test/fixtures/',
+        )
+      end
 
-    #   assert_empty err
-    #   expected_output = strip_heredoc <<-EOS
-    #     Worker electected as leader, pushing 3 tests to the queue.
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
 
-    #     Finished pushing 3 tests to the queue in X.XXs.
+        Randomized with seed 123
+        ..*.
 
-    #     Randomized with seed 123
-    #     ..*.
+        Pending: (Failures listed here are expected and do not affect your suite's status)
 
-    #     Pending: (Failures listed here are expected and do not affect your suite's status)
+          1) Object doesn't work on first try
+             # The example failed, but another attempt will be done to rule out flakiness
 
-    #       1) Object doesn't work on first try
-    #          # The example failed, but another attempt will be done to rule out flakiness
+             Failure/Error: expect(1 + 1).to be == 42
 
-    #          Failure/Error: expect(1 + 1).to be == 42
+               expected: == 42
+                    got:    2
+             # ./spec/dummy_spec.rb:12:in `block (2 levels) in <top (required)>'
+             # ./spec/dummy_spec.rb:7
 
-    #            expected: == 42
-    #                 got:    2
-    #          # ./spec/dummy_spec.rb:12:in `block (2 levels) in <top (required)>'
-    #          # ./spec/dummy_spec.rb:7
+        Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
+        4 examples, 0 failures, 1 pending
 
-    #     Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
-    #     4 examples, 0 failures, 1 pending
+        Randomized with seed 123
 
-    #     Randomized with seed 123
+      EOS
+      assert_equal expected_output, normalize(out)
+      assert_equal 0, $?.exitstatus
 
-    #   EOS
-    #   assert_equal expected_output, normalize(out)
-    #   assert_equal 0, $?.exitstatus
+      out, err = capture_subprocess_io do
+        system(
+          { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          '--max-requeues', '1',
+          '--requeue-tolerance', '1',
+          chdir: 'test/fixtures/',
+        )
+      end
 
-    #   out, err = capture_subprocess_io do
-    #     system(
-    #       { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
-    #       @exe,
-    #       '--queue', @redis_url,
-    #       '--seed', '123',
-    #       '--build', '1',
-    #       '--worker', '1',
-    #       '--timeout', '1',
-    #       '--max-requeues', '1',
-    #       '--requeue-tolerance', '1',
-    #       chdir: 'test/fixtures/',
-    #     )
-    #   end
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
+        Found 0 tests to retry, processing the main queue.
 
-    #   assert_empty err
-    #   expected_output = strip_heredoc <<-EOS
-    #     Found 0 tests to retry, processing the main queue.
-
-    #     Randomized with seed 123
+        Randomized with seed 123
 
 
-    #     Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
-    #     0 examples, 0 failures
+        Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
+        0 examples, 0 failures
 
-    #     Randomized with seed 123
+        Randomized with seed 123
 
-    #   EOS
+      EOS
 
-    #   assert_equal expected_output, normalize(out)
-    #   assert_equal 0, $?.exitstatus
-    # end
+      assert_equal expected_output, normalize(out)
+      assert_equal 0, $?.exitstatus
+    end
 
     def test_retry_report
       # Run first worker, failing all tests
@@ -255,199 +249,189 @@ module Integration
     end
 
 
-    # def test_before_suite_errors
-    #   out, err = capture_subprocess_io do
-    #     system(
-    #       { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
-    #       @exe,
-    #       '--queue', @redis_url,
-    #       '--seed', '123',
-    #       '--build', '1',
-    #       '--worker', '1',
-    #       '--timeout', '1',
-    #       '--max-requeues', '1',
-    #       '--requeue-tolerance', '1',
-    #       chdir: 'test/fixtures/before_suite',
-    #     )
-    #   end
+    def test_before_suite_errors
+      out, err = capture_subprocess_io do
+        system(
+          { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          '--max-requeues', '1',
+          '--requeue-tolerance', '1',
+          chdir: 'test/fixtures/before_suite',
+        )
+      end
 
-    #   assert_empty err
-    #   expected_output = strip_heredoc <<-EOS
-    #     Worker electected as leader, pushing 2 tests to the queue.
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
 
-    #     Finished pushing 2 tests to the queue in X.XXs.
+        Randomized with seed 123
 
-    #     Randomized with seed 123
+        An error occurred in a `before(:suite)` hook.
+        Failure/Error: raise "Whoops"
 
-    #     An error occurred in a `before(:suite)` hook.
-    #     Failure/Error: raise "Whoops"
-
-    #     RuntimeError:
-    #       Whoops
-    #     # ./spec/spec_helper.rb:5:in `block (2 levels) in <top (required)>'
+        RuntimeError:
+          Whoops
+        # ./spec/spec_helper.rb:5:in `block (2 levels) in <top (required)>'
 
 
-    #     Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
-    #     0 examples, 0 failures, 1 error occurred outside of examples
+        Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
+        0 examples, 0 failures, 1 error occurred outside of examples
 
-    #     Randomized with seed 123
+        Randomized with seed 123
 
-    #   EOS
+      EOS
 
-    #   assert_equal expected_output, normalize(out)
-    #   assert_equal 0, $?.exitstatus
-    # end
+      assert_equal expected_output, normalize(out)
+      assert_equal 0, $?.exitstatus
+    end
 
-    # def test_report
-    #   out, err = capture_subprocess_io do
-    #     system(
-    #       { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
-    #       @exe,
-    #       '--queue', @redis_url,
-    #       '--seed', '123',
-    #       '--build', '1',
-    #       '--worker', '1',
-    #       '--timeout', '1',
-    #       '--max-requeues', '0',
-    #       '--requeue-tolerance', '0',
-    #       chdir: 'test/fixtures/',
-    #     )
-    #     assert_equal 1, $?.exitstatus
-    #   end
+    def test_report
+      out, err = capture_subprocess_io do
+        system(
+          { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          '--max-requeues', '0',
+          '--requeue-tolerance', '0',
+          chdir: 'test/fixtures/',
+        )
+        assert_equal 1, $?.exitstatus
+      end
 
-    #   assert_empty err
-    #   expected_output = strip_heredoc <<-EOS
-    #     Worker electected as leader, pushing 3 tests to the queue.
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
 
-    #     Finished pushing 3 tests to the queue in X.XXs.
+        Randomized with seed 123
+        ..F
 
-    #     Randomized with seed 123
-    #     ..F
+        Failures:
 
-    #     Failures:
+          1) Object doesn't work on first try
+             Failure/Error: expect(1 + 1).to be == 42
 
-    #       1) Object doesn't work on first try
-    #          Failure/Error: expect(1 + 1).to be == 42
+               expected: == 42
+                    got:    2
+             # ./spec/dummy_spec.rb:12:in `block (2 levels) in <top (required)>'
 
-    #            expected: == 42
-    #                 got:    2
-    #          # ./spec/dummy_spec.rb:12:in `block (2 levels) in <top (required)>'
+        Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
+        3 examples, 1 failure
 
-    #     Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
-    #     3 examples, 1 failure
+        Failed examples:
 
-    #     Failed examples:
+        rspec ./spec/dummy_spec.rb:7 # Object doesn't work on first try
 
-    #     rspec ./spec/dummy_spec.rb:7 # Object doesn't work on first try
+        Randomized with seed 123
 
-    #     Randomized with seed 123
+      EOS
 
-    #   EOS
+      assert_equal expected_output, normalize(out)
 
-    #   assert_equal expected_output, normalize(out)
+      out, err = capture_subprocess_io do
+        system(
+          { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
+          @exe,
+          '--queue', @redis_url,
+          '--build', '1',
+          '--report',
+          '--timeout', '5',
+          chdir: 'test/fixtures/',
+        )
+      end
 
-    #   out, err = capture_subprocess_io do
-    #     system(
-    #       { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
-    #       @exe,
-    #       '--queue', @redis_url,
-    #       '--build', '1',
-    #       '--report',
-    #       '--timeout', '5',
-    #       chdir: 'test/fixtures/',
-    #     )
-    #   end
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
+        --- Waiting for workers to complete
+        +++ 1 error found
 
-    #   assert_empty err
-    #   expected_output = strip_heredoc <<-EOS
-    #     --- Waiting for workers to complete
-    #     +++ 1 error found
+          Object doesn't work on first try
+          Failure/Error: expect(1 + 1).to be == 42
 
-    #       Object doesn't work on first try
-    #       Failure/Error: expect(1 + 1).to be == 42
+            expected: == 42
+                 got:    2
+          # ./spec/dummy_spec.rb:12:in `block (2 levels) in <top (required)>'
 
-    #         expected: == 42
-    #              got:    2
-    #       # ./spec/dummy_spec.rb:12:in `block (2 levels) in <top (required)>'
+        rspec ./spec/dummy_spec.rb:7 # Object doesn't work on first try
+      EOS
 
-    #     rspec ./spec/dummy_spec.rb:7 # Object doesn't work on first try
-    #   EOS
+      assert_equal expected_output, normalize(out)
+    end
 
-    #   assert_equal expected_output, normalize(out)
-    # end
+    def test_world_wants_to_quit
+      out, err = capture_subprocess_io do
+        system(
+          { 'EARLY_EXIT' => '1' },
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          chdir: 'test/fixtures/early_exit_suite',
+        )
+      end
 
-    # def test_world_wants_to_quit
-    #   out, err = capture_subprocess_io do
-    #     system(
-    #       { 'EARLY_EXIT' => '1' },
-    #       @exe,
-    #       '--queue', @redis_url,
-    #       '--seed', '123',
-    #       '--build', '1',
-    #       '--worker', '1',
-    #       '--timeout', '1',
-    #       chdir: 'test/fixtures/early_exit_suite',
-    #     )
-    #   end
-
-    #   assert_empty err
-
-    #   expected_output = strip_heredoc <<-EOS
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
 
 
-    #   Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
-    #   0 examples, 0 failures
+        Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
+        0 examples, 0 failures
 
-    #   EOS
-    #   assert_equal expected_output, normalize(out)
+      EOS
+      assert_equal expected_output, normalize(out)
 
-    #   assert_equal 1, $?.exitstatus
+      assert_equal 1, $?.exitstatus
 
 
-    #   out, err = capture_subprocess_io do
-    #     system(
-    #       @exe,
-    #       '--queue', @redis_url,
-    #       '--seed', '123',
-    #       '--build', '1',
-    #       '--worker', '2',
-    #       '--timeout', '1',
-    #       chdir: 'test/fixtures/early_exit_suite',
-    #     )
-    #   end
+      out, err = capture_subprocess_io do
+        system(
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '2',
+          '--timeout', '1',
+          chdir: 'test/fixtures/early_exit_suite',
+        )
+      end
 
-    #   assert_empty err
-    #   expected_output = strip_heredoc <<-EOS
-    #     Worker electected as leader, pushing 1 tests to the queue.
+      assert_empty err
+      expected_output = strip_heredoc <<-EOS
 
-    #     Finished pushing 1 tests to the queue in X.XXs.
+        Randomized with seed 123
+        F
 
-    #     Randomized with seed 123
-    #     F
+        Failures:
 
-    #     Failures:
+          1) Object should be executed
+             Failure/Error: expect(1 + 1).to be == 4
 
-    #       1) Object should be executed
-    #          Failure/Error: expect(1 + 1).to be == 4
+               expected: == 4
+                    got:    2
+             # ./spec/dummy_spec.rb:6:in `block (2 levels) in <top (required)>'
 
-    #            expected: == 4
-    #                 got:    2
-    #          # ./spec/dummy_spec.rb:6:in `block (2 levels) in <top (required)>'
+        Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
+        1 example, 1 failure
 
-    #     Finished in X.XXXXX seconds (files took X.XXXXX seconds to load)
-    #     1 example, 1 failure
+        Failed examples:
 
-    #     Failed examples:
+        rspec ./spec/dummy_spec.rb:5 # Object should be executed
 
-    #     rspec ./spec/dummy_spec.rb:5 # Object should be executed
+        Randomized with seed 123
 
-    #     Randomized with seed 123
+      EOS
 
-    #   EOS
-
-    #   assert_equal expected_output, normalize(out)
-    #   assert_equal 1, $?.exitstatus
-    # end
+      assert_equal expected_output, normalize(out)
+      assert_equal 1, $?.exitstatus
+    end
 
     private
 

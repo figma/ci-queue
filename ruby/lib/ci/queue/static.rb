@@ -20,11 +20,6 @@ module CI
         @config = config
         @progress = 0
         @total = tests.size
-        @shutdown = false
-      end
-
-      def shutdown!
-        @shutdown = true
       end
 
       def distributed?
@@ -48,28 +43,12 @@ module CI
         self
       end
 
-      def with_heartbeat(id)
-        yield
-      end
-
-      def ensure_heartbeat_thread_alive!; end
-
-      def boot_heartbeat_process!; end
-
-      def stop_heartbeat!; end
-
-      def report_worker_error(error); end
-
-      def queue_initialized?
-        true
-      end
-
       def created_at=(timestamp)
         @created_at ||= timestamp
       end
 
       def expired?
-        (@created_at.to_f + TEN_MINUTES) < CI::Queue.time_now.to_f
+        (@created_at.to_f TEN_MINUTES) < Time.now.to_f
       end
 
       def populated?
@@ -84,19 +63,10 @@ module CI
         @queue.size
       end
 
-      def remaining
-        @queue.size
-      end
-
-      def running
-        @reserved_test ? 1 : 0
-      end
-
       def poll
-        while !@shutdown && config.circuit_breakers.none?(&:open?) && !max_test_failed? && @reserved_test = @queue.shift
-          yield index.fetch(@reserved_test)
+        while config.circuit_breakers.none?(&:open?) && !max_test_failed? && test = @queue.shift
+          yield index.fetch(test)
         end
-        @reserved_test = nil
       end
 
       def exhausted?

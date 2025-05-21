@@ -107,7 +107,6 @@ module Minitest
   end
 
   module Queue
-    include ::CI::Queue::OutputHelpers
     attr_writer :run_command_formatter, :project_root
 
     def run_command_formatter
@@ -157,7 +156,7 @@ module Minitest
       end
 
       def id
-        @id ||= "#{@runnable}##{@method_name}".freeze
+        @id ||= "#{@runnable}##{@method_name}"
       end
 
       def <=>(other)
@@ -188,7 +187,7 @@ module Minitest
       private
 
       def current_timestamp
-        CI::Queue.time_now.to_i
+        Time.now.to_i
       end
     end
 
@@ -227,10 +226,7 @@ module Minitest
 
     def run_from_queue(reporter, *)
       queue.poll do |example|
-        result = queue.with_heartbeat(example.id) do
-          example.run
-        end
-
+        result = example.run
         failed = !(result.passed? || result.skipped?)
 
         if example.flaky?
@@ -238,63 +234,40 @@ module Minitest
           failed = false
         end
 
-        if failed && queue.config.failing_test && queue.config.failing_test != example.id
-          # When we do a bisect, we don't care about the result other than the test we're running the bisect on
-          result.mark_as_flaked!
-          failed = false
-        elsif failed
+        if failed
           queue.report_failure!
         else
           queue.report_success!
         end
 
+        requeued = false
         if failed && CI::Queue.requeueable?(result) && queue.requeue(example)
+          requeued = true
           result.requeue!
           reporter.record(result)
-        elsif queue.acknowledge(example)
-          reporter.record(result)
-          queue.increment_test_failed if failed
-        elsif !failed
+        elsif queue.acknowledge(example) || !failed
           # If the test was already acknowledged by another worker (we timed out)
           # Then we only record it if it is successful.
           reporter.record(result)
         end
+
+        if !requeued && failed
+          queue.increment_test_failed
+        end
       end
-      queue.stop_heartbeat!
-    rescue Errno::EPIPE
-      # This happens when the heartbeat process dies
-      reopen_previous_step
-      puts red("The heartbeat process died. This worker is exiting early.")
-      exit!(41)
-    rescue CI::Queue::Error => error
-      reopen_previous_step
-      puts red("#{error.class}: #{error.message}")
-      error.backtrace.each do |frame|
-        puts red(frame)
-      end
-      exit!(41)
-    rescue => error
-      reopen_previous_step
-      queue.report_worker_error(error)
-      puts red("This worker exited because of an uncaught application error:")
-      puts red("#{error.class}: #{error.message}")
-      error.backtrace.each do |frame|
-        puts red(frame)
-      end
-      exit!(42)
     end
   end
 end
 
-Minitest.singleton_class.prepend(Minitest::Queue)
-if defined? Minitest::Result
-  Minitest::Result.prepend(Minitest::Requeueing)
-  Minitest::Result.prepend(Minitest::Flakiness)
-  Minitest::Result.prepend(Minitest::WithTimestamps)
+MiniTest.singleton_class.prepend(MiniTest::Queue)
+if defined? MiniTest::Result
+  MiniTest::Result.prepend(MiniTest::Requeueing)
+  MiniTest::Result.prepend(MiniTest::Flakiness)
+  MiniTest::Result.prepend(MiniTest::WithTimestamps)
 else
-  Minitest::Test.prepend(Minitest::Requeueing)
-  Minitest::Test.prepend(Minitest::Flakiness)
-  Minitest::Test.prepend(Minitest::WithTimestamps)
+  MiniTest::Test.prepend(MiniTest::Requeueing)
+  MiniTest::Test.prepend(MiniTest::Flakiness)
+  MiniTest::Test.prepend(MiniTest::WithTimestamps)
 
   module MinitestBackwardCompatibility
     def source_location
@@ -305,5 +278,5 @@ else
       self.class.name
     end
   end
-  Minitest::Test.prepend(MinitestBackwardCompatibility)
+  MiniTest::Test.prepend(MinitestBackwardCompatibility)
 end

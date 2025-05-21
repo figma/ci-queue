@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 require 'test_helper'
 require 'tmpdir'
-require 'active_support'
 require 'active_support/testing/time_helpers'
 
 module Integration
@@ -23,128 +22,6 @@ module Integration
       @exe = File.expand_path('../../../exe/minitest-queue', __FILE__)
     end
 
-    def test_default_reporter
-      out, err = capture_subprocess_io do
-        system(
-          { 'BUILDKITE' => '1' },
-          @exe, 'run',
-          '--queue', @redis_url,
-          '--seed', 'foobar',
-          '--build', '1',
-          '--worker', '1',
-          '--timeout', '1',
-          '--max-requeues', '1',
-          '--requeue-tolerance', '1',
-          '-Itest',
-          'test/dummy_test.rb',
-          chdir: 'test/fixtures/',
-        )
-      end
-
-      assert_empty err
-      assert_match(/Expected false to be truthy/, normalize(out)) # failure output
-      result = normalize(out.lines.last.strip)
-      assert_equal '--- Ran 11 tests, 8 assertions, 2 failures, 1 errors, 1 skips, 4 requeues in X.XXs', result
-    end
-
-    def test_lost_test_with_heartbeat_monitor
-      _, err = capture_subprocess_io do
-        2.times.map do |i|
-          Thread.start  do
-            system(
-              { 'BUILDKITE' => '1' },
-              @exe, 'run',
-              '--queue', @redis_url,
-              '--seed', 'foobar',
-              '--build', '1',
-              '--worker', i.to_s,
-              '--timeout', '1',
-              '--max-requeues', '1',
-              '--requeue-tolerance', '1',
-              '--heartbeat', '1',
-              '-Itest',
-              'test/lost_test.rb',
-              chdir: 'test/fixtures/',
-            )
-          end
-        end.each(&:join)
-      end
-
-      assert_empty err
-
-      Tempfile.open('warnings') do |warnings_file|
-        out, err = capture_subprocess_io do
-          system(
-            @exe, 'report',
-            '--queue', @redis_url,
-            '--build', '1',
-            '--timeout', '1',
-            '--warnings-file', warnings_file.path,
-            '--heartbeat',
-            chdir: 'test/fixtures/',
-            )
-        end
-
-        assert_empty err
-        result = normalize(out.lines[1].strip)
-        assert_equal "Ran 1 tests, 0 assertions, 0 failures, 0 errors, 0 skips, 0 requeues in X.XXs (aggregated)", result
-        warnings = JSON.parse(warnings_file.read)
-        assert_equal 1, warnings.size
-      end
-    end
-
-    def test_verbose_reporter
-      out, err = capture_subprocess_io do
-        system(
-          { 'BUILDKITE' => '1' },
-          @exe, 'run',
-          '--queue', @redis_url,
-          '--seed', 'foobar',
-          '--build', '1',
-          '--worker', '1',
-          '--timeout', '1',
-          '--max-requeues', '1',
-          '--requeue-tolerance', '1',
-          '-Itest',
-          'test/dummy_test.rb',
-          '-v',
-          chdir: 'test/fixtures/',
-        )
-      end
-
-      assert_empty err
-      assert_match(/ATest#test_foo \d+\.\d+ = S/, normalize(out)) # verbose test ouptut
-      result = normalize(out.lines.last.strip)
-      assert_equal '--- Ran 11 tests, 8 assertions, 2 failures, 1 errors, 1 skips, 4 requeues in X.XXs', result
-    end
-
-    def test_debug_log
-      Tempfile.open('debug_log') do |log_file|
-        out, err = capture_subprocess_io do
-          system(
-            { 'BUILDKITE' => '1' },
-            @exe, 'run',
-            '--queue', @redis_url,
-            '--seed', 'foobar',
-            '--build', '1',
-            '--worker', '1',
-            '--timeout', '1',
-            '--max-requeues', '1',
-            '--requeue-tolerance', '1',
-            '-Itest',
-            'test/dummy_test.rb',
-            '--debug-log', log_file.path,
-            chdir: 'test/fixtures/',
-          )
-        end
-
-      assert_includes File.read(log_file.path), 'INFO -- : Finished \'["exists", "build:1:worker:1:queue"]\': 0'
-      assert_empty err
-      result = normalize(out.lines.last.strip)
-      assert_equal '--- Ran 11 tests, 8 assertions, 2 failures, 1 errors, 1 skips, 4 requeues in X.XXs', result
-      end
-    end
-
     def test_buildkite_output
       out, err = capture_subprocess_io do
         system(
@@ -164,7 +41,6 @@ module Integration
       end
 
       assert_empty err
-      assert_match(/^\^{3} \+{3}$/m, normalize(out)) # reopen failed step
       output = normalize(out.lines.last.strip)
       assert_equal '--- Ran 11 tests, 8 assertions, 2 failures, 1 errors, 1 skips, 4 requeues in X.XXs', output
     end
@@ -201,7 +77,6 @@ module Integration
           '--build', '1',
           '--worker', '1',
           '--timeout', '1',
-          '--heartbeat', '1',
           '--max-requeues', '1',
           '--requeue-tolerance', '1',
           '--max-test-failed', '3',
@@ -216,6 +91,7 @@ module Integration
       assert_equal 'Ran 47 tests, 47 assertions, 3 failures, 0 errors, 0 skips, 44 requeues in X.XXs', output
 
       # Run the reporter
+      exit_code = nil
       out, err = capture_subprocess_io do
         system(
           @exe, 'report',
@@ -232,14 +108,10 @@ module Integration
       assert_empty err
       expected = <<~EXPECTED
         Waiting for workers to complete
-        Ran 3 tests, 47 assertions, 3 failures, 0 errors, 0 skips, 44 requeues in X.XXs (aggregated)
-      EXPECTED
-      assert_equal expected.strip, normalize(out.lines[0..2].join.strip)
-      expected = <<~EXPECTED
         Encountered too many failed tests. Test run was ended early.
         97 tests weren't run.
       EXPECTED
-      assert_equal expected.strip, normalize(out.lines.last(2).join.strip)
+      assert_equal expected.strip, normalize(out.lines[0..4].join.strip)
     end
 
     def test_circuit_breaker
@@ -339,47 +211,6 @@ module Integration
           '--requeue-tolerance', '1',
           '-Itest',
           'test/passing_test.rb',
-          chdir: 'test/fixtures/',
-        )
-      end
-      assert_empty err
-      output = normalize(out.lines.last.strip)
-      assert_equal 'All tests were ran already', output
-    end
-
-    def test_automatic_retry
-      out, err = capture_subprocess_io do
-        system(
-          @exe, 'run',
-          '--queue', @redis_url,
-          '--seed', 'foobar',
-          '--build', '1',
-          '--worker', '1',
-          '--timeout', '1',
-          '--max-requeues', '1',
-          '--requeue-tolerance', '1',
-          '-Itest',
-          'test/failing_test.rb',
-          chdir: 'test/fixtures/',
-        )
-      end
-      assert_empty err
-      output = normalize(out.lines.last.strip)
-      assert_equal 'Ran 200 tests, 200 assertions, 100 failures, 0 errors, 0 skips, 100 requeues in X.XXs', output
-
-      out, err = capture_subprocess_io do
-        system(
-          { "BUILDKITE_RETRY_TYPE" => "automatic" },
-          @exe, 'run',
-          '--queue', @redis_url,
-          '--seed', 'foobar',
-          '--build', '1',
-          '--worker', '1',
-          '--timeout', '1',
-          '--max-requeues', '1',
-          '--requeue-tolerance', '1',
-          '-Itest',
-          'test/failing_test.rb',
           chdir: 'test/fixtures/',
         )
       end
@@ -524,7 +355,6 @@ module Integration
     def test_down_redis
       out, err = capture_subprocess_io do
         system(
-          { "CI_QUEUE_DISABLE_RECONNECT_ATTEMPTS" => "1" },
           @exe, 'run',
           '--queue', 'redis://localhost:1337',
           '--seed', 'foobar',
@@ -640,8 +470,7 @@ module Integration
                     .sort_by { |h| "#{h[:test_id]}##{h[:test_index]}" }
                     .first
 
-      start_delta = RUBY_ENGINE == "truffleruby" ? 15 : 5
-      assert_in_delta start_time.to_i, failure[:test_start_timestamp], start_delta, "start time"
+      assert_in_delta start_time.to_i, failure[:test_start_timestamp], 5
       assert_in_delta end_time.to_i, failure[:test_finish_timestamp], 5
       assert failure[:test_finish_timestamp] > failure[:test_start_timestamp]
     end
@@ -673,25 +502,13 @@ module Integration
         <?xml version="1.1" encoding="UTF-8"?>
         <testsuites>
           <testsuite name="ATest" filepath="test/dummy_test.rb" skipped="5" failures="1" errors="0" tests="6" assertions="5" time="X.XX">
-            <testcase name="test_foo" classname="ATest" assertions="0" time="X.XX" timestamp="X.XX" flaky_test="false" run-command=\"bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_foo\" lineno="5">
-              <skipped type="Minitest::Skip" message="Skipped, no message given">
-                <![CDATA[
-        Skipped:
-        test_foo(ATest) [test/dummy_test.rb]:
-        Skipped, no message given
-        ]]>
-              </skipped>
+            <testcase name="test_foo" classname="ATest" assertions="0" time="X.XX" flaky_test="false" run-command=\"bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_foo\" lineno="5">
+              <skipped type="Minitest::Skip"/>
             </testcase>
-            <testcase name="test_bar" classname="ATest" assertions="1" time="X.XX" timestamp="X.XX" flaky_test="false" run-command=\"bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_bar\" lineno="5">
-              <skipped type="Minitest::Assertion" message="Expected false to be truthy.">
-                <![CDATA[
-        Skipped:
-        test_bar(ATest) [test/dummy_test.rb]:
-        Expected false to be truthy.
-        ]]>
-              </skipped>
+            <testcase name="test_bar" classname="ATest" assertions="1" time="X.XX" flaky_test="false" run-command=\"bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_bar\" lineno="5">
+              <skipped type="Minitest::Assertion"/>
             </testcase>
-            <testcase name="test_flaky" classname="ATest" assertions="1" time="X.XX" timestamp="X.XX" flaky_test="true" run-command=\"bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_flaky\" lineno="5">
+            <testcase name="test_flaky" classname="ATest" assertions="1" time="X.XX" flaky_test="true" run-command=\"bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_flaky\" lineno="5">
               <failure type="Minitest::Assertion" message="Expected false to be truthy.">
                 <![CDATA[
         Skipped:
@@ -700,8 +517,8 @@ module Integration
         ]]>
               </failure>
             </testcase>
-            <testcase name="test_flaky_passes" classname="ATest" assertions="1" time="X.XX" timestamp="X.XX" flaky_test="true" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_flaky_passes" lineno="5"/>
-            <testcase name="test_flaky_fails_retry" classname="ATest" assertions="1" time="X.XX" timestamp="X.XX" flaky_test="true" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_flaky_fails_retry" lineno="5">
+            <testcase name="test_flaky_passes" classname="ATest" assertions="1" time="X.XX" flaky_test="true" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_flaky_passes" lineno="5"/>
+            <testcase name="test_flaky_fails_retry" classname="ATest" assertions="1" time="X.XX" flaky_test="true" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_flaky_fails_retry" lineno="5">
               <failure type="Minitest::Assertion" message="Expected false to be truthy.">
                 <![CDATA[
         Skipped:
@@ -710,7 +527,7 @@ module Integration
         ]]>
               </failure>
             </testcase>
-            <testcase name="test_bar" classname="ATest" assertions="1" time="X.XX" timestamp="X.XX" flaky_test="false" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_bar" lineno="5">
+            <testcase name="test_bar" classname="ATest" assertions="1" time="X.XX" flaky_test="false" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n ATest\\#test_bar" lineno="5">
               <failure type="Minitest::Assertion" message="Expected false to be truthy.">
                 <![CDATA[
         Failure:
@@ -721,19 +538,11 @@ module Integration
             </testcase>
           </testsuite>
           <testsuite name="BTest" filepath="test/dummy_test.rb" skipped="1" failures="0" errors="1" tests="3" assertions="1" time="X.XX">
-            <testcase name="test_bar" classname="BTest" assertions="0" time="X.XX" timestamp="X.XX" flaky_test="false" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n BTest\\#test_bar" lineno="36">
-              <skipped type="TypeError" message="TypeError: String can&apos;t be coerced into Integer">
-                <![CDATA[
-        Skipped:
-        test_bar(BTest) [test/dummy_test.rb]:
-        TypeError: String can't be coerced into Integer
-            test/dummy_test.rb:37:in `+'
-            test/dummy_test.rb:37:in `test_bar'
-        ]]>
-              </skipped>
+            <testcase name="test_bar" classname="BTest" assertions="0" time="X.XX" flaky_test="false" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n BTest\\#test_bar" lineno="36">
+              <skipped type="TypeError"/>
             </testcase>
-            <testcase name="test_foo" classname="BTest" assertions="1" time="X.XX" timestamp="X.XX" flaky_test="false" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n BTest\\#test_foo" lineno="36"/>
-            <testcase name="test_bar" classname="BTest" assertions="0" time="X.XX" timestamp="X.XX" flaky_test="false" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n BTest\\#test_bar" lineno="36">
+            <testcase name="test_foo" classname="BTest" assertions="1" time="X.XX" flaky_test="false" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n BTest\\#test_foo" lineno="36"/>
+            <testcase name="test_bar" classname="BTest" assertions="0" time="X.XX" flaky_test="false" run-command="bundle exec ruby -Ilib:test test/dummy_test.rb -n BTest\\#test_bar" lineno="36">
               <error type="TypeError" message="TypeError: String can&apos;t be coerced into Integer">
                 <![CDATA[
         Failure:
@@ -869,58 +678,37 @@ module Integration
       output = normalize(out.lines.last.strip)
       assert_equal 'Ran 11 tests, 8 assertions, 2 failures, 1 errors, 1 skips, 4 requeues in X.XXs', output
 
-      Tempfile.open('warnings') do |warnings_file|
-        out, err = capture_subprocess_io do
-          system(
-            @exe, 'report',
-            '--queue', @redis_url,
-            '--build', '1',
-            '--timeout', '1',
-            '--warnings-file', warnings_file.path,
-            chdir: 'test/fixtures/',
-          )
-        end
-
-        warnings_file.rewind
-        content = JSON.parse(warnings_file.read)
-        assert_equal 1, content.size
-        assert_equal "RESERVED_LOST_TEST", content[0]["type"]
-        assert_equal "Atest#test_bar", content[0]["test"]
-        assert_equal 2, content[0]["timeout"]
-
-        assert_empty err
-        output = normalize(out)
-        expected_output = <<~END
-          Waiting for workers to complete
-          Ran 7 tests, 8 assertions, 2 failures, 1 errors, 1 skips, 4 requeues in X.XXs (aggregated)
-
-          FAIL ATest#test_bar
-          Expected false to be truthy.
-              test/dummy_test.rb:10:in `test_bar'
-
-          FAIL ATest#test_flaky_fails_retry
-          Expected false to be truthy.
-              test/dummy_test.rb:23:in `test_flaky_fails_retry'
-
-          ERROR BTest#test_bar
-        END
-        assert_includes output, expected_output
-
-        expected_output = <<~END
-          REQUEUE
-          ATest#test_bar (requeued 1 times)
-
-          REQUEUE
-          ATest#test_flaky (requeued 1 times)
-
-          REQUEUE
-          ATest#test_flaky_fails_retry (requeued 1 times)
-
-          REQUEUE
-          BTest#test_bar (requeued 1 times)
-        END
-        assert_includes output, expected_output
+      out, err = capture_subprocess_io do
+        system(
+          @exe, 'report',
+          '--queue', @redis_url,
+          '--build', '1',
+          '--timeout', '1',
+          chdir: 'test/fixtures/',
+        )
       end
+      assert_empty err
+      output = normalize(out)
+      expected_output = <<~END
+        Waiting for workers to complete
+
+        [WARNING] Atest#test_bar was picked up by another worker because it didn't complete in the allocated 2 seconds.
+        You may want to either optimize this test or bump ci-queue timeout.
+        It's also possible that the worker that was processing it was terminated without being able to report back.
+
+        Ran 7 tests, 8 assertions, 2 failures, 1 errors, 1 skips, 4 requeues in X.XXs (aggregated)
+
+        FAIL ATest#test_bar
+        Expected false to be truthy.
+            test/dummy_test.rb:10:in `test_bar'
+
+        FAIL ATest#test_flaky_fails_retry
+        Expected false to be truthy.
+            test/dummy_test.rb:23:in `test_flaky_fails_retry'
+
+        ERROR BTest#test_bar
+      END
+      assert_includes output, expected_output
     end
 
     def test_utf8_tests_and_marshal
@@ -940,47 +728,10 @@ module Integration
       end
 
       assert_empty err
-      output = normalize(out.lines.last)
+      output = normalize(out)
       assert_equal <<~END, output
         Ran 1 tests, 1 assertions, 1 failures, 0 errors, 0 skips, 0 requeues in X.XXs
       END
-    end
-
-    def test_application_error
-      capture_subprocess_io do
-        system(
-          { 'BUILDKITE' => '1' },
-          @exe, 'run',
-          '--queue', @redis_url,
-          '--seed', 'foobar',
-          '--build', '1',
-          '--worker', '1',
-          '--timeout', '1',
-          '--max-requeues', '1',
-          '--requeue-tolerance', '1',
-          '-Itest',
-          'test/bad_framework_test.rb',
-          chdir: 'test/fixtures/',
-        )
-      end
-
-      assert_equal 42, $?.exitstatus
-
-      out, _ = capture_subprocess_io do
-        system(
-          @exe, 'report',
-          '--queue', @redis_url,
-          '--build', '1',
-          '--timeout', '1',
-          '--heartbeat',
-          chdir: 'test/fixtures/',
-          )
-      end
-
-      assert_includes out, "Worker 1 crashed"
-      assert_includes out, "Some error in the test framework"
-
-      assert_equal 1, $?.exitstatus
     end
 
     private
