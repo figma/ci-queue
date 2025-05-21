@@ -202,6 +202,7 @@ module CI
           @total = tests.size
 
           if @master = redis.setnx(key('master-status'), 'setup')
+            puts "Worker electected as leader, pushing #{@total} tests to the queue."
             redis.multi do |transaction|
               transaction.lpush(key('queue'), tests) unless tests.empty?
               transaction.set(key('total'), @total)
