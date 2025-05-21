@@ -23,9 +23,16 @@ module CI
 
           time_left = config.report_timeout
           time_left_with_no_workers = config.inactive_workers_timeout
+          last_heartbeat_time = Time.now
           until exhausted? || time_left <= 0 || max_test_failed? || time_left_with_no_workers <= 0
             time_left -= 1
             sleep 1
+
+            # Heartbeat log every 5 minutes
+            if Time.now - last_heartbeat_time > 300
+              puts '[ci-queue] Still working'
+              last_heartbeat_time = Time.now
+            end
 
             if active_workers?
               time_left_with_no_workers = config.inactive_workers_timeout
