@@ -184,6 +184,8 @@ module Minitest
         Minitest.queue.flaky?(self)
       end
 
+      attr_reader :runnable, :method_name
+
       private
 
       def current_timestamp
@@ -226,6 +228,7 @@ module Minitest
 
     def run_from_queue(reporter, *)
       queue.poll do |example|
+        reporter.prerecord(example.runnable, example.method_name)
         result = example.run
         failed = !(result.passed? || result.skipped?)
 
