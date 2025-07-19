@@ -262,6 +262,7 @@ module Minitest
   end
 end
 
+MiniTest = Minitest
 MiniTest.singleton_class.prepend(MiniTest::Queue)
 if defined? MiniTest::Result
   MiniTest::Result.prepend(MiniTest::Requeueing)
