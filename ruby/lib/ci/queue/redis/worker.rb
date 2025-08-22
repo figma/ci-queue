@@ -323,7 +323,9 @@ module CI
               'You have to acknowledge it before you can reserve another one'
           end
 
-          @reserved_test = try_to_reserve_lost_test || try_to_reserve_test
+          test = try_to_reserve_lost_test || try_to_reserve_test
+          @reserved_test = test if test
+          test
         end
 
         def try_to_reserve_test
