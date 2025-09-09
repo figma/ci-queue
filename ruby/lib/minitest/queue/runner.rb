@@ -366,6 +366,15 @@ module Minitest
           end
 
           help = <<~EOS
+            Path to file containing known flaky tests in JSON format.
+            Format: [{"testSuite": "TestClass", "testName": "testMethod1"}, ...]
+          EOS
+          opts.separator ""
+          opts.on('--known-flaky-tests-file PATH', help) do |path|
+            queue_config.known_flaky_tests_file = path
+          end
+
+          help = <<~EOS
             Unique identifier for the workload. All workers working on the same suite of tests must have the same build identifier.
             If the build is tried again, or another revision is built, this value must be different.
             It's automatically inferred on Buildkite, CircleCI, Heroku CI, and Travis.

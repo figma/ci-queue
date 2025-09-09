@@ -241,7 +241,7 @@ module Minitest
         end
 
         requeued = false
-        if failed && CI::Queue.requeueable?(result) && queue.requeue(example)
+        if failed && CI::Queue.requeueable?(result) && !queue.config.known_flaky?(example) && queue.requeue(example)
           requeued = true
           result.requeue!
           reporter.record(result)

@@ -1,11 +1,13 @@
 # frozen_string_literal: true
+require 'json'
+
 module CI
   module Queue
     class Configuration
       attr_accessor :timeout, :worker_id, :max_requeues, :grind_count, :failure_file, :export_flaky_tests_file
       attr_accessor :requeue_tolerance, :namespace, :failing_test, :statsd_endpoint
       attr_accessor :max_test_duration, :max_test_duration_percentile, :track_test_duration
-      attr_accessor :max_test_failed, :redis_ttl
+      attr_accessor :max_test_failed, :redis_ttl, :known_flaky_tests_file
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
       attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
@@ -28,6 +30,15 @@ module CI
         rescue SystemCallError
           []
         end
+
+        def load_known_flaky_tests(path)
+          return [] unless path
+          json_data = JSON.parse(::File.read(path))
+          json_data.map { |test| "#{test['testSuite']}##{test['testName']}" }
+          json_data.to_set
+        rescue SystemCallError, JSON::ParserError
+          []
+        end
       end
 
       def initialize(
@@ -36,12 +47,13 @@ module CI
         grind_count: nil, max_duration: nil, failure_file: nil, max_test_duration: nil,
         max_test_duration_percentile: 0.5, track_test_duration: false, max_test_failed: nil,
         queue_init_timeout: nil, redis_ttl: 8 * 60 * 60, report_timeout: nil, inactive_workers_timeout: nil,
-        export_flaky_tests_file: nil
+        export_flaky_tests_file: nil, known_flaky_tests_file: nil
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
         @failure_file = failure_file
         @flaky_tests = flaky_tests
+        @known_flaky_tests = self.class.load_known_flaky_tests(known_flaky_tests_file)
         @grind_count = grind_count
         @max_requeues = max_requeues
         @max_test_duration = max_test_duration
@@ -61,6 +73,7 @@ module CI
         @report_timeout = report_timeout
         @inactive_workers_timeout = inactive_workers_timeout
         @export_flaky_tests_file = export_flaky_tests_file
+        @known_flaky_tests_file = known_flaky_tests_file
       end
 
       def queue_init_timeout
@@ -89,6 +102,10 @@ module CI
 
       def flaky?(test)
         @flaky_tests.include?(test.id)
+      end
+
+      def known_flaky?(test)
+        @known_flaky_tests.include?(test.id)
       end
 
       def seed
