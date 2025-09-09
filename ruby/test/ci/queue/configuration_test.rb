@@ -141,7 +141,6 @@ module CI::Queue
         file.close
 
         known_flaky_tests = Configuration.load_known_flaky_tests(file.path)
-        puts known_flaky_tests
         assert_includes known_flaky_tests, 'TestClass1#test_method1'
         assert_includes known_flaky_tests, 'TestClass2#test_method2'
         assert_equal 2, known_flaky_tests.size

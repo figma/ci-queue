@@ -31,6 +31,18 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
+      - name: Add MiniTest compatibility shim
+        run: |
+          cat << 'EOF' > ruby/test/minitest_compat.rb
+          # Compatibility shim for legacy MiniTest constant (pre-5.0)
+          require 'minitest'
+          unless defined?(MiniTest)
+            MiniTest = Minitest
+          end
+          EOF
+          # Add require to files
+          sed -i '5i require_relative "minitest_compat"' ruby/test/test_helper.rb
+          sed -i '5i require_relative "../../test/minitest_compat"' ruby/lib/minitest/queue.rb
       - name: Run Ruby tests
         run: |
           bin/before-install
@@ -38,6 +50,7 @@ jobs:
         env:
           SUITE: ruby
           REDIS_HOST: localhost
+          RUBYOPT: "-W0"
 
   python-tests:
     runs-on: ubuntu-latest
