@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 require 'test_helper'
+require 'tempfile'
+require 'ostruct'
+require 'json'
 
 module CI::Queue
   class ConfigurationTest < Minitest::Test
@@ -126,6 +129,43 @@ module CI::Queue
       config.timeout = 120
 
       assert_equal 45, config.report_timeout
+    end
+
+    def test_load_known_flaky_tests_with_valid_file
+      Tempfile.open('known_flaky_tests.json') do |file|
+        test_data = [
+          { 'testSuite' => 'TestClass1', 'testName' => 'test_method1' },
+          { 'testSuite' => 'TestClass2', 'testName' => 'test_method2' }
+        ]
+        file.write(test_data.to_json)
+        file.close
+
+        known_flaky_tests = Configuration.load_known_flaky_tests(file.path)
+        puts known_flaky_tests
+        assert_includes known_flaky_tests, 'TestClass1#test_method1'
+        assert_includes known_flaky_tests, 'TestClass2#test_method2'
+        assert_equal 2, known_flaky_tests.size
+      end
+    end
+
+    def test_load_known_flaky_tests_with_missing_file
+      known_flaky_tests = Configuration.load_known_flaky_tests('/tmp/does-not-exist.json')
+      assert_empty known_flaky_tests
+    end
+
+    def test_load_known_flaky_tests_with_invalid_json
+      Tempfile.open('invalid.json') do |file|
+        file.write('{ invalid json }')
+        file.close
+
+        known_flaky_tests = Configuration.load_known_flaky_tests(file.path)
+        assert_empty known_flaky_tests
+      end
+    end
+
+    def test_known_flaky_tests_file_configuration
+      config = Configuration.new(known_flaky_tests_file: '/path/to/file.json')
+      assert_equal '/path/to/file.json', config.known_flaky_tests_file
     end
 
   end

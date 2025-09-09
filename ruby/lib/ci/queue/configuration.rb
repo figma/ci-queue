@@ -34,8 +34,8 @@ module CI
         def load_known_flaky_tests(path)
           return [] unless path
           json_data = JSON.parse(::File.read(path))
-          json_data.map { |test| "#{test['testSuite']}##{test['testName']}" }
-          json_data.to_set
+          known_flaky_test_ids = json_data.map { |test| "#{test['testSuite']}##{test['testName']}" }
+          known_flaky_test_ids.to_set
         rescue SystemCallError, JSON::ParserError
           []
         end
