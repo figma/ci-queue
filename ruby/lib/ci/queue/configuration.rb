@@ -104,8 +104,8 @@ module CI
         @flaky_tests.include?(test.id)
       end
 
-      def known_flaky?(test)
-        @known_flaky_tests.include?(test.id)
+      def known_flaky?(id)
+        @known_flaky_tests.include?(id)
       end
 
       def seed
