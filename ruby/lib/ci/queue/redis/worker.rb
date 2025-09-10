@@ -110,6 +110,9 @@ module CI
           raise_on_mismatching_test(test_key)
           global_max_requeues = config.global_max_requeues(total)
 
+          puts "Checking requeue for redis queue"
+          puts "config.known_flaky?(key): #{config.known_flaky?(test_key)}"
+
           requeued = config.max_requeues > 0 && global_max_requeues > 0 && !config.known_flaky?(test_key) && eval_script(
             :requeue,
             keys: [

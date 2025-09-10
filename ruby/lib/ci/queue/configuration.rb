@@ -21,6 +21,7 @@ module CI
             flaky_tests: load_flaky_tests(env['CI_QUEUE_FLAKY_TESTS']),
             statsd_endpoint: env['CI_QUEUE_STATSD_ADDR'],
             redis_ttl: env['CI_QUEUE_REDIS_TTL']&.to_i ||  8 * 60 * 60,
+            known_flaky_tests: load_known_flaky_tests(env['CI_QUEUE_KNOWN_FLAKY_TESTS']),
           )
         end
 
@@ -32,9 +33,9 @@ module CI
         end
 
         def load_known_flaky_tests(path)
-          return [] unless path
           json_data = JSON.parse(::File.read(path))
           known_flaky_test_ids = json_data.map { |test| "#{test['testSuite']}##{test['testName']}" }
+          puts "Known flaky tests: #{known_flaky_test_ids}"
           known_flaky_test_ids.to_set
         rescue SystemCallError, JSON::ParserError
           []
@@ -47,13 +48,13 @@ module CI
         grind_count: nil, max_duration: nil, failure_file: nil, max_test_duration: nil,
         max_test_duration_percentile: 0.5, track_test_duration: false, max_test_failed: nil,
         queue_init_timeout: nil, redis_ttl: 8 * 60 * 60, report_timeout: nil, inactive_workers_timeout: nil,
-        export_flaky_tests_file: nil, known_flaky_tests_file: nil
+        export_flaky_tests_file: nil, known_flaky_tests: []
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
         @failure_file = failure_file
         @flaky_tests = flaky_tests
-        @known_flaky_tests = self.class.load_known_flaky_tests(known_flaky_tests_file)
+        @known_flaky_tests = known_flaky_tests
         @grind_count = grind_count
         @max_requeues = max_requeues
         @max_test_duration = max_test_duration
@@ -73,7 +74,6 @@ module CI
         @report_timeout = report_timeout
         @inactive_workers_timeout = inactive_workers_timeout
         @export_flaky_tests_file = export_flaky_tests_file
-        @known_flaky_tests_file = known_flaky_tests_file
       end
 
       def queue_init_timeout
@@ -123,6 +123,8 @@ module CI
       def global_max_requeues(tests_count)
         (tests_count * Float(requeue_tolerance)).ceil
       end
+
+      private
     end
   end
 end

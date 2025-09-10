@@ -240,6 +240,9 @@ module Minitest
           queue.report_success!
         end
 
+        puts "Checking run_from_queue for minitest integration"
+        puts "config.known_flaky?(key): #{queue.config.known_flaky?(example.id)}"
+
         requeued = false
         if failed && CI::Queue.requeueable?(result) && !queue.config.known_flaky?(example.id) && queue.requeue(example)
           requeued = true

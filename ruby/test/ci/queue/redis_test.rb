@@ -256,7 +256,7 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def build_queue
-    worker(1, max_requeues: 1, requeue_tolerance: 0.1, populate: false, max_consecutive_failures: 10)
+    worker(1, max_requeues: 1, requeue_tolerance: 0.1, populate: false, max_consecutive_failures: 10, known_flaky_tests_file: @config.known_flaky_tests_file)
   end
 
   def populate(worker, tests: TEST_LIST.dup)
