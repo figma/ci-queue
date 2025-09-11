@@ -150,6 +150,9 @@ module CI::Queue
     def test_load_known_flaky_tests_with_missing_file
       known_flaky_tests = Configuration.load_known_flaky_tests('/tmp/does-not-exist.json')
       assert_empty known_flaky_tests
+
+      known_flaky_tests = Configuration.load_known_flaky_tests(nil)
+      assert_empty known_flaky_tests
     end
 
     def test_load_known_flaky_tests_with_invalid_json
@@ -162,9 +165,31 @@ module CI::Queue
       end
     end
 
-    def test_known_flaky_tests_file_configuration
-      config = Configuration.new(known_flaky_tests_file: '/path/to/file.json')
-      assert_equal '/path/to/file.json', config.known_flaky_tests_file
+    def test_known_flaky_method
+      known_flaky_tests = Set.new(['TestClass1#test_method1', 'TestClass2#test_method2'])
+      config = Configuration.new(known_flaky_tests: known_flaky_tests)
+      
+      assert config.known_flaky?('TestClass1#test_method1')
+      assert config.known_flaky?('TestClass2#test_method2')
+      refute config.known_flaky?('TestClass3#test_method3')
+    end
+
+    def test_from_env_with_known_flaky_tests
+      Tempfile.open('known_flaky_tests.json') do |file|
+        test_data = [
+          { 'testSuite' => 'TestClass1', 'testName' => 'test_method1' },
+          { 'testSuite' => 'TestClass2', 'testName' => 'test_method2' }
+        ]
+        file.write(test_data.to_json)
+        file.close
+
+        env = { 'CI_QUEUE_KNOWN_FLAKY_TESTS' => file.path }
+        config = Configuration.from_env(env)
+        
+        assert config.known_flaky?('TestClass1#test_method1')
+        assert config.known_flaky?('TestClass2#test_method2')
+        refute config.known_flaky?('TestClass3#test_method3')
+      end
     end
 
   end
