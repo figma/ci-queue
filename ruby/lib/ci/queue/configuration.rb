@@ -7,7 +7,7 @@ module CI
       attr_accessor :timeout, :worker_id, :max_requeues, :grind_count, :failure_file, :export_flaky_tests_file
       attr_accessor :requeue_tolerance, :namespace, :failing_test, :statsd_endpoint
       attr_accessor :max_test_duration, :max_test_duration_percentile, :track_test_duration
-      attr_accessor :max_test_failed, :redis_ttl, :known_flaky_tests_file
+      attr_accessor :max_test_failed, :redis_ttl
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
       attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
@@ -33,11 +33,14 @@ module CI
         end
 
         def load_known_flaky_tests(path)
+          if path == nil
+            return []
+          end
           json_data = JSON.parse(::File.read(path))
           known_flaky_test_ids = json_data.map { |test| "#{test['testSuite']}##{test['testName']}" }
-          puts "Known flaky tests: #{known_flaky_test_ids}"
+          puts "ci-queue: Loaded #{known_flaky_test_ids.size} known flaky tests. These will be skipped from requeueing"
           known_flaky_test_ids.to_set
-        rescue SystemCallError, JSON::ParserError
+        rescue SystemCallError, JSON::ParserError, TypeError
           []
         end
       end
@@ -123,8 +126,6 @@ module CI
       def global_max_requeues(tests_count)
         (tests_count * Float(requeue_tolerance)).ceil
       end
-
-      private
     end
   end
 end
