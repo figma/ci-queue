@@ -1,4 +1,6 @@
 # frozen_string_literal: true
+require 'json'
+
 module CI
   module Queue
     class Configuration
@@ -19,6 +21,7 @@ module CI
             flaky_tests: load_flaky_tests(env['CI_QUEUE_FLAKY_TESTS']),
             statsd_endpoint: env['CI_QUEUE_STATSD_ADDR'],
             redis_ttl: env['CI_QUEUE_REDIS_TTL']&.to_i ||  8 * 60 * 60,
+            known_flaky_tests: load_known_flaky_tests(env['CI_QUEUE_KNOWN_FLAKY_TESTS']),
           )
         end
 
@@ -26,6 +29,18 @@ module CI
           return [] unless path
           ::File.readlines(path).map(&:chomp).to_set
         rescue SystemCallError
+          []
+        end
+
+        def load_known_flaky_tests(path)
+          if path == nil
+            return []
+          end
+          json_data = JSON.parse(::File.read(path))
+          known_flaky_test_ids = json_data.map { |test| "#{test['testSuite']}##{test['testName']}" }
+          puts "ci-queue: Loaded #{known_flaky_test_ids.size} known flaky tests. These will be skipped from requeueing"
+          known_flaky_test_ids.to_set
+        rescue SystemCallError, JSON::ParserError, TypeError
           []
         end
       end
@@ -36,12 +51,13 @@ module CI
         grind_count: nil, max_duration: nil, failure_file: nil, max_test_duration: nil,
         max_test_duration_percentile: 0.5, track_test_duration: false, max_test_failed: nil,
         queue_init_timeout: nil, redis_ttl: 8 * 60 * 60, report_timeout: nil, inactive_workers_timeout: nil,
-        export_flaky_tests_file: nil
+        export_flaky_tests_file: nil, known_flaky_tests: []
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
         @failure_file = failure_file
         @flaky_tests = flaky_tests
+        @known_flaky_tests = known_flaky_tests
         @grind_count = grind_count
         @max_requeues = max_requeues
         @max_test_duration = max_test_duration
@@ -89,6 +105,10 @@ module CI
 
       def flaky?(test)
         @flaky_tests.include?(test.id)
+      end
+
+      def known_flaky?(id)
+        @known_flaky_tests.include?(id)
       end
 
       def seed

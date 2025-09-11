@@ -37,6 +37,10 @@ Two implementations are provided, please refer to the respective documentations:
   - [Python](python/)
   - [Ruby](ruby/)
 
+## Figma Installation Instructions
+
+Once you have merged your changes into the ci-queue repo, copy the SHAs and pin it in the package.json for integration-test if its an interaction-tests ci-queue update or in the Gemfile in the repo root for sinatra.
+
 ## Redis Requirements
 
 `ci-queue` expects the Redis server to have an [eviction policy](https://redis.io/docs/manual/eviction/#eviction-policies) of `allkeys-lru`.

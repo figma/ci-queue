@@ -110,7 +110,7 @@ module CI
           raise_on_mismatching_test(test_key)
           global_max_requeues = config.global_max_requeues(total)
 
-          requeued = config.max_requeues > 0 && global_max_requeues > 0 && eval_script(
+          requeued = config.max_requeues > 0 && global_max_requeues > 0 && !config.known_flaky?(test_key) && eval_script(
             :requeue,
             keys: [
               key('processed'),

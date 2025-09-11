@@ -106,7 +106,7 @@ module CI
       attr_reader :index
 
       def should_requeue?(key)
-        requeues[key] < config.max_requeues && requeues.values.inject(0, :+) < config.global_max_requeues(total)
+        requeues[key] < config.max_requeues && requeues.values.inject(0, :+) < config.global_max_requeues(total) && !config.known_flaky?(key)
       end
 
       def requeues
