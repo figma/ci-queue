@@ -50,10 +50,22 @@ module CI
 
         def poll
           wait_for_master
+          idle_since = nil
+          idle_state_printed = false
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
             if test = reserve
+              idle_since = nil
               yield index.fetch(test)
             else
+              idle_since ||= Time.now
+              if Time.now - idle_since > 120 && !idle_state_printed
+                puts "Worker #{worker_id} has been idle for 120 seconds. Printing global state..."
+                puts "  Processed tests: #{redis.scard(key('processed'))}"
+                puts "  Pending tests: #{redis.llen(key('queue'))}. #{redis.lrange(key('queue'), 0, -1)}"
+                puts "  Running tests: #{redis.zcard(key('running'))}. #{redis.zrange(key('running'), 0, -1)}"
+                puts "  Owners: #{redis.hgetall(key('owners'))}"
+                idle_state_printed = true
+              end
               sleep 0.05
             end
           end
