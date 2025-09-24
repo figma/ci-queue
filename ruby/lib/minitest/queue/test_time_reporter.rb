@@ -1,20 +1,24 @@
 # frozen_string_literal: true
 require 'minitest/reporters'
+require 'json'
 
 module Minitest
   module Queue
     class TestTimeReporter < Minitest::Reporters::BaseReporter
       include ::CI::Queue::OutputHelpers
 
-      def initialize(build:, limit: nil, percentile: nil, **options)
+      def initialize(build:, limit: nil, percentile: nil, export_file: nil, **options)
         super(options)
         @test_time_hash = build.fetch
         @limit = limit
         @percentile = percentile
+        @export_file = export_file
         @success = true
       end
 
       def report
+        export_timing_data if @export_file
+
         return if limit.nil? || test_time_hash.empty?
 
         puts '+++ Test Time Report'
@@ -46,6 +50,20 @@ module Minitest
       private
 
       attr_reader :test_time_hash, :limit, :percentile
+
+      def export_timing_data
+        return if test_time_hash.empty?
+
+        # Convert test_time_hash to simple format: {"TestClass#method": avg_duration_ms}
+        timing_data = test_time_hash.transform_values do |durations|
+          durations.sum.to_f / durations.size  # Average duration
+        end
+
+        File.write(@export_file, JSON.pretty_generate(timing_data))
+        puts "Exported timing data for #{timing_data.size} tests to #{@export_file}"
+      rescue => e
+        puts "Warning: Failed to export timing data to #{@export_file}: #{e.message}"
+      end
 
       def humanized_percentile
         percentile_in_percentage = percentile * 100
