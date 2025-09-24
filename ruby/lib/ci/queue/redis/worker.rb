@@ -18,8 +18,11 @@ module CI
         def initialize(redis, config)
           @reserved_test = nil
           @shutdown_required = false
+          @idle_since = nil
           super(redis, config)
         end
+
+        attr_accessor :idle_since
 
         def distributed?
           true
@@ -48,6 +51,10 @@ module CI
           @master
         end
 
+        def idle?
+          !(@idle_since.nil?)
+        end
+
         def poll
           wait_for_master
           idle_since = nil
@@ -60,10 +67,17 @@ module CI
               idle_since ||= Time.now
               if Time.now - idle_since > 120 && !idle_state_printed
                 puts "Worker #{worker_id} has been idle for 120 seconds. Printing global state..."
+                running_tests = redis.zrange(key('running'), 0, -1, withscores: true)
                 puts "  Processed tests: #{redis.scard(key('processed'))}"
                 puts "  Pending tests: #{redis.llen(key('queue'))}. #{redis.lrange(key('queue'), 0, -1)}"
-                puts "  Running tests: #{redis.zcard(key('running'))}. #{redis.zrange(key('running'), 0, -1)}"
+                puts "  Running tests: #{running_tests.size}. #{running_tests}"
                 puts "  Owners: #{redis.hgetall(key('owners'))}"
+                unless running_tests.empty?
+                  puts "  Checking if running tests are in processed set:"
+                  running_tests.each do |test, _score|
+                    puts "    #{test}: #{redis.sismember(key('processed'), test)}"
+                  end
+                end
                 idle_state_printed = true
               end
               sleep 0.05
@@ -202,6 +216,12 @@ module CI
             ],
             argv: [Time.now.to_f, timeout],
           )
+
+          if lost_test.nil? && idle?
+            puts "Worker #{worker_id} could not reserve a lost test while idle"
+            puts "Printing running tests:"
+            puts "#{redis.zrange(key('running'), 0, -1, withscores: true)}"
+          end
 
           if lost_test
             build.record_warning(Warnings::RESERVED_LOST_TEST, test: lost_test, timeout: timeout)
