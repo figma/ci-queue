@@ -653,6 +653,55 @@ module Integration
       end
     end
 
+    def test_redis_reporter_export_timing_file
+      Dir.mktmpdir do |dir|
+        timing_file = File.join(dir, 'timing_file.json')
+
+        capture_subprocess_io do
+          system(
+            { 'BUILDKITE' => '1' },
+            @exe, 'run',
+            '--queue', @redis_url,
+            '--seed', 'foobar',
+            '--build', '1',
+            '--worker', '1',
+            '--timeout', '1',
+            '--track-test-duration',
+            '-Itest',
+            'test/passing_test.rb',
+            chdir: 'test/fixtures/',
+          )
+        end
+
+        out, err = capture_subprocess_io do
+          system(
+            @exe, 'report',
+            '--queue', @redis_url,
+            '--build', '1',
+            '--timeout', '1',
+            '--track-test-duration',
+            '--export-timing-file', timing_file,
+            chdir: 'test/fixtures/',
+          )
+        end
+
+        assert_empty err
+        assert_includes out, "Exported timing data for"
+        assert_includes out, "tests to #{timing_file}"
+
+        assert File.exist?(timing_file), "Timing file should exist"
+        content = File.read(timing_file)
+        timing_data = JSON.parse(content)
+
+        assert_operator timing_data.size, :>, 0, "Should have timing data"
+        timing_data.each do |test_id, duration|
+          assert_match(/\w+#test_\w+/, test_id, "Test ID should be in format Class#method")
+          assert_kind_of Numeric, duration, "Duration should be numeric"
+          assert_operator duration, :>=, 0, "Duration should be non-negative"
+        end
+      end
+    end
+
     def test_redis_reporter
       # HACK: Simulate a timeout
       config = CI::Queue::Configuration.new(build_id: '1', worker_id: '1', timeout: '1')

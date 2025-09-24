@@ -271,7 +271,7 @@ module Integration
         +++ Test Time Report
         Detected 1 test(s) over the desired time limit.
         Please make them faster than 1.0e-05ms in the 50th percentile.
-        test_flaky_passes:
+        ATest#test_flaky_passes:
       EOS
       assert output.start_with?(expected.strip)
       assert_empty err
@@ -312,6 +312,57 @@ module Integration
 
       refute_empty err
       assert err.include?("--max-test-duration-percentile must be within range (0, 1] (OptionParser::ParseError)")
+    end
+
+    def test_grind_export_timing_file
+      Dir.mktmpdir do |dir|
+        timing_file = File.join(dir, 'grind_timing_file.json')
+
+        system(
+          { 'BUILDKITE' => '1' },
+          @exe, 'grind',
+          '--queue', @redis_url,
+          '--seed', 'foobar',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          '--grind-count', '10',
+          '--grind-list', 'grind_list_success.txt',
+          '--track-test-duration',
+          '-Itest',
+          'test/dummy_test.rb',
+          chdir: 'test/fixtures/',
+        )
+
+        out, err = capture_subprocess_io do
+          system(
+            { 'BUILDKITE' => '1' },
+            @exe, 'report_grind',
+            '--queue', @redis_url,
+            '--seed', 'foobar',
+            '--build', '1',
+            '--worker', '1',
+            '--timeout', '5',
+            '--track-test-duration',
+            '--export-timing-file', timing_file,
+            chdir: 'test/fixtures/',
+          )
+        end
+
+        assert_empty err
+        assert_includes out, "Exported timing data for"
+        assert_includes out, "tests to #{timing_file}"
+
+        assert File.exist?(timing_file), "Timing file should exist"
+        content = File.read(timing_file)
+        timing_data = JSON.parse(content)
+
+        assert_equal 1, timing_data.size, "Should have timing data for 1 test"
+        test_id, duration = timing_data.first
+        assert_equal "ATest#test_flaky_passes", test_id
+        assert_kind_of Numeric, duration, "Duration should be numeric"
+        assert_operator duration, :>=, 0, "Duration should be non-negative"
+      end
     end
   end
 end
