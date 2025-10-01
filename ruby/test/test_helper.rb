@@ -5,6 +5,8 @@ SimpleCov.start
 $LOAD_PATH.unshift File.expand_path('../../lib', __FILE__)
 ENV['PATH'] = "#{File.expand_path('../../exe/', __FILE__)}:#{ENV['PATH']}"
 
+ENV['MT_COMPAT'] = '1'
+
 require 'ci/queue'
 require 'ci/queue/redis'
 require 'minitest/queue'

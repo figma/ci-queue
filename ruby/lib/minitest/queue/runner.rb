@@ -585,7 +585,7 @@ module Minitest
           end
 
           help = <<~EOS
-            Test ordering strategy: random, timing_based (default: random)
+            Test ordering strategy: random, timing_based, suite_bin_packing (default: random)
           EOS
           opts.separator ""
           opts.on('--strategy STRATEGY', help) do |strategy|
@@ -614,6 +614,22 @@ module Minitest
           opts.separator ""
           opts.on('--export-timing-file PATH', help) do |path|
             queue_config.export_timing_file = path
+          end
+
+          help = <<~EOS
+            Max suite chunk duration in ms (default: 120000 = 2 minutes)
+          EOS
+          opts.separator ""
+          opts.on('--suite-max-duration DURATION', Float, help) do |duration|
+            queue_config.suite_max_duration = duration
+          end
+
+          help = <<~EOS
+            Safety buffer percentage for suite splitting (default: 10%)
+          EOS
+          opts.separator ""
+          opts.on('--suite-buffer PERCENT', Float, help) do |percent|
+            queue_config.suite_buffer_percent = percent
           end
 
           opts.separator ""

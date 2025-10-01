@@ -168,7 +168,7 @@ module CI::Queue
     def test_known_flaky_method
       known_flaky_tests = Set.new(['TestClass1#test_method1', 'TestClass2#test_method2'])
       config = Configuration.new(known_flaky_tests: known_flaky_tests)
-      
+
       assert config.known_flaky?('TestClass1#test_method1')
       assert config.known_flaky?('TestClass2#test_method2')
       refute config.known_flaky?('TestClass3#test_method3')
@@ -185,7 +185,7 @@ module CI::Queue
 
         env = { 'CI_QUEUE_KNOWN_FLAKY_TESTS' => file.path }
         config = Configuration.from_env(env)
-        
+
         assert config.known_flaky?('TestClass1#test_method1')
         assert config.known_flaky?('TestClass2#test_method2')
         refute config.known_flaky?('TestClass3#test_method3')
