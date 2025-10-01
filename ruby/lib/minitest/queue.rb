@@ -225,27 +225,82 @@ module Minitest
     end
 
     def run_from_queue(reporter, *)
-      queue.poll do |example|
-        result = example.run
-        failed = !(result.passed? || result.skipped?)
-
-        if example.flaky?
-          result.mark_as_flaked!
-          failed = false
-        end
-
-        if failed
-          queue.report_failure!
+      queue.poll do |executable|
+        if executable.respond_to?(:chunk?) && executable.chunk?
+          run_chunk(executable, reporter)
         else
-          queue.report_success!
+          run_single_test(executable, reporter)
         end
+      end
+    end
 
-        requeued = false
-        if failed && CI::Queue.requeueable?(result) && !queue.config.known_flaky?(example.id) && queue.requeue(example)
+    private
+
+    def run_chunk(chunk, reporter)
+      @in_chunk_context = true
+
+      chunk_start_time = Time.now
+      chunk_failed = false
+      failed_tests = []
+
+      puts "Running chunk: #{chunk.suite_name} (#{chunk.size} tests)" if ENV['VERBOSE']
+
+      # Run each test in the chunk sequentially
+      chunk.tests.each do |test|
+        result = test.run
+        test_failed = handle_test_result(test, result, reporter)
+
+        if test_failed
+          chunk_failed = true
+          failed_tests << test
+        end
+      end
+
+      # Acknowledge the chunk (not individual tests)
+      queue.acknowledge(chunk)
+
+      # Log chunk completion
+      if ENV['VERBOSE']
+        duration = Time.now - chunk_start_time
+        status = chunk_failed ? "FAILED" : "PASSED"
+        puts "Completed chunk: #{chunk.suite_name} (#{status}, #{duration.round(2)}s)"
+      end
+
+      # Requeue failed tests individually if needed
+      requeue_failed_tests(failed_tests) if chunk_failed
+    ensure
+      @in_chunk_context = false
+    end
+
+    def run_single_test(test, reporter)
+      result = test.run
+      handle_test_result(test, result, reporter)
+    end
+
+    def handle_test_result(test, result, reporter)
+      # Returns true if test failed
+      failed = !(result.passed? || result.skipped?)
+
+      if test.flaky?
+        result.mark_as_flaked!
+        failed = false
+      end
+
+      if failed
+        queue.report_failure!
+      else
+        queue.report_success!
+      end
+
+      # Handle requeuing for single tests (not chunks)
+      # Chunks handle requeuing separately
+      requeued = false
+      unless in_chunk_context?
+        if failed && CI::Queue.requeueable?(result) && !queue.config.known_flaky?(test.id) && queue.requeue(test)
           requeued = true
           result.requeue!
           reporter.record(result)
-        elsif queue.acknowledge(example) || !failed
+        elsif queue.acknowledge(test) || !failed
           # If the test was already acknowledged by another worker (we timed out)
           # Then we only record it if it is successful.
           reporter.record(result)
@@ -254,7 +309,30 @@ module Minitest
         if !requeued && failed
           queue.increment_test_failed
         end
+      else
+        # In chunk context - always record result
+        reporter.record(result)
+
+        if failed
+          queue.increment_test_failed
+        end
       end
+
+      failed
+    end
+
+    def requeue_failed_tests(failed_tests)
+      # Requeue failed tests individually (breaking them out of chunk)
+      failed_tests.each do |test|
+        if CI::Queue.requeueable?(test) && !queue.config.known_flaky?(test.id)
+          queue.requeue(test)
+        end
+      end
+    end
+
+    def in_chunk_context?
+      # Track whether we're currently executing a chunk
+      @in_chunk_context ||= false
     end
   end
 end

@@ -9,6 +9,7 @@ module CI
       attr_accessor :max_test_duration, :max_test_duration_percentile, :track_test_duration
       attr_accessor :max_test_failed, :redis_ttl
       attr_accessor :strategy, :timing_file, :timing_fallback_duration, :export_timing_file
+      attr_accessor :suite_max_duration, :suite_buffer_percent
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
       attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
@@ -53,7 +54,8 @@ module CI
         max_test_duration_percentile: 0.5, track_test_duration: false, max_test_failed: nil,
         queue_init_timeout: nil, redis_ttl: 8 * 60 * 60, report_timeout: nil, inactive_workers_timeout: nil,
         export_flaky_tests_file: nil, known_flaky_tests: [],
-        strategy: :random, timing_file: nil, timing_fallback_duration: 100.0, export_timing_file: nil
+        strategy: :random, timing_file: nil, timing_fallback_duration: 100.0, export_timing_file: nil,
+        suite_max_duration: 120_000, suite_buffer_percent: 10
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
@@ -83,6 +85,8 @@ module CI
         @timing_file = timing_file
         @timing_fallback_duration = timing_fallback_duration
         @export_timing_file = export_timing_file
+        @suite_max_duration = suite_max_duration
+        @suite_buffer_percent = suite_buffer_percent
       end
 
       def queue_init_timeout
