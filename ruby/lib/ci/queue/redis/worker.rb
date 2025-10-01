@@ -276,19 +276,25 @@ module CI
         private
 
         def store_chunk_metadata(chunks)
-          redis.multi do |transaction|
-            chunks.each do |chunk|
-              # Store chunk metadata with TTL
-              transaction.set(
-                key('chunk', chunk.id),
-                chunk.to_json
-              )
-              transaction.expire(key('chunk', chunk.id), config.redis_ttl)
+          # Batch operations to avoid exceeding Redis multi operation limits
+          # Each chunk requires 3 commands (set, expire, sadd), so batch conservatively
+          batch_size = 7 # 7 chunks = 21 commands + 1 expire = 22 commands per batch
 
-              # Track all chunks for cleanup
-              transaction.sadd(key('chunks'), chunk.id)
+          chunks.each_slice(batch_size) do |chunk_batch|
+            redis.multi do |transaction|
+              chunk_batch.each do |chunk|
+                # Store chunk metadata with TTL
+                transaction.set(
+                  key('chunk', chunk.id),
+                  chunk.to_json
+                )
+                transaction.expire(key('chunk', chunk.id), config.redis_ttl)
+
+                # Track all chunks for cleanup
+                transaction.sadd(key('chunks'), chunk.id)
+              end
+              transaction.expire(key('chunks'), config.redis_ttl)
             end
-            transaction.expire(key('chunks'), config.redis_ttl)
           end
         end
 

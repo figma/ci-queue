@@ -202,6 +202,34 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     assert ttl > 0, 'Chunk metadata should have TTL set'
   end
 
+  def test_populate_with_many_chunks_uses_batching
+    # Create 20 test chunks to verify batching works (batch size is 7)
+    tests = (1..20).map { |i| MockTest.new("TestSuite#{i}#test_1") }
+    chunks = (1..20).map do |i|
+      CI::Queue::TestChunk.new("TestSuite#{i}:full_suite", "TestSuite#{i}", :full_suite, [], 1000.0)
+    end
+
+    CI::Queue.stub(:shuffle, chunks) do
+      @worker.populate(tests)
+    end
+
+    # Verify all chunks were stored despite batching
+    chunks.each do |chunk|
+      chunk_data = @redis.get("build:42:chunk:#{chunk.id}")
+      refute_nil chunk_data, "Chunk #{chunk.id} should be stored"
+
+      parsed = JSON.parse(chunk_data)
+      assert_equal 'full_suite', parsed['type']
+      assert_equal chunk.suite_name, parsed['suite_name']
+    end
+
+    # Verify all chunk IDs are in the chunks set
+    stored_chunks = @redis.smembers('build:42:chunks')
+    chunks.each do |chunk|
+      assert_includes stored_chunks, chunk.id
+    end
+  end
+
   private
 
   def create_mock_tests(test_ids)
