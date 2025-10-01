@@ -29,6 +29,12 @@ Gem::Specification.new do |spec|
 
   spec.metadata['allowed_push_host'] = 'https://rubygems.org'
 
+  spec.add_runtime_dependency 'base64'
+  spec.add_runtime_dependency 'bigdecimal'
+  spec.add_runtime_dependency 'logger'
+  spec.add_runtime_dependency 'mutex_m'
+  spec.add_runtime_dependency 'ostruct'
+
   spec.add_development_dependency 'bundler'
   spec.add_development_dependency 'rake'
   spec.add_development_dependency 'minitest', ENV.fetch('MINITEST_VERSION', '~> 5.11')
