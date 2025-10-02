@@ -23,13 +23,14 @@ module Minitest::Queue
     def test_record_when_test_pass
       test = MiniTest::Mock.new
       test.expect(:passed?, true)
-      test.expect(:name, 'some test')
+      test.expect(:klass, 'SomeClass')
+      test.expect(:name, 'test_something')
       test.expect(:time, 0.1) # in seconds
       @test_time_recorder.record(test)
 
       record = @test_time_record.fetch
       assert_equal 1, record.length
-      assert_equal [100], record['some test'] # in milliseconds
+      assert_equal [100], record['SomeClass#test_something'] # in milliseconds
     end
 
     def test_record_do_nothing_when_test_failed

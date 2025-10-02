@@ -74,6 +74,10 @@ module Minitest
           TestDataReporter.new(namespace: queue_config&.namespace),
           OrderReporter.new(path: 'log/test_order.log'),
         ]
+        if queue_config.track_test_duration
+          test_time_record = CI::Queue::Redis::TestTimeRecord.new(queue_url, queue_config)
+          reporters << TestTimeRecorder.new(build: test_time_record)
+        end
         if queue_config.statsd_endpoint
           reporters << Minitest::Reporters::StatsdReporter.new(statsd_endpoint: queue_config.statsd_endpoint)
         end
@@ -218,8 +222,23 @@ module Minitest
           File.write(queue_config.export_flaky_tests_file, failures)
         end
 
+        # Handle timing data reporting and export
+        test_time_reporter_success = if queue_config.track_test_duration
+          test_time_record = CI::Queue::Redis::TestTimeRecord.new(queue_url, queue_config)
+          test_time_reporter = TestTimeReporter.new(
+            build: test_time_record,
+            limit: queue_config.max_test_duration,
+            percentile: queue_config.max_test_duration_percentile,
+            export_file: queue_config.export_timing_file
+          )
+          test_time_reporter.report
+          test_time_reporter.success?
+        else
+          true
+        end
+
         reporter.report
-        exit! reporter.success? ? 0 : 1
+        exit! reporter.success? && test_time_reporter_success ? 0 : 1
       end
 
       def report_grind_command
@@ -241,6 +260,7 @@ module Minitest
             build: test_time_record,
             limit: queue_config.max_test_duration,
             percentile: queue_config.max_test_duration_percentile,
+            export_file: queue_config.export_timing_file
           )
           test_time_reporter.report
 
@@ -562,6 +582,38 @@ module Minitest
           EOS
           opts.on('--load-globs TEST_GLOBS', Array, help) do |test_globs|
             self.test_globs = test_globs
+          end
+
+          help = <<~EOS
+            Test ordering strategy: random, timing_based (default: random)
+          EOS
+          opts.separator ""
+          opts.on('--strategy STRATEGY', help) do |strategy|
+            queue_config.strategy = strategy.to_sym
+          end
+
+          help = <<~EOS
+            Path to JSON timing file for timing_based strategy
+          EOS
+          opts.separator ""
+          opts.on('--timing-file PATH', help) do |path|
+            queue_config.timing_file = path
+          end
+
+          help = <<~EOS
+            Fallback duration in ms for unknown tests (default: 100)
+          EOS
+          opts.separator ""
+          opts.on('--timing-fallback DURATION', Float, help) do |duration|
+            queue_config.timing_fallback_duration = duration
+          end
+
+          help = <<~EOS
+            Export test timing data to JSON file after run (use with report command)
+          EOS
+          opts.separator ""
+          opts.on('--export-timing-file PATH', help) do |path|
+            queue_config.export_timing_file = path
           end
 
           opts.separator ""

@@ -30,7 +30,7 @@ module CI
 
         def populate(tests, random: Random.new)
           @index = tests.map { |t| [t.id, t] }.to_h
-          tests = Queue.shuffle(tests, random)
+          tests = Queue.shuffle(tests, random, config: config)
           push(tests.map(&:id))
           self
         end

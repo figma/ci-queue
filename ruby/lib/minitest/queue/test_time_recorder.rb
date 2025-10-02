@@ -10,7 +10,8 @@ module Minitest
       def record(test)
         return unless test.passed?
         test_duration_in_milliseconds = test.time * 1000
-        @build.record(test.name, test_duration_in_milliseconds)
+        test_id = "#{test.klass}##{test.name}"
+        @build.record(test_id, test_duration_in_milliseconds)
       end
     end
   end
