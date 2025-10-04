@@ -46,4 +46,5 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'snappy'
   spec.add_development_dependency 'msgpack'
   spec.add_development_dependency 'rubocop'
+  spec.add_development_dependency 'rexml'
 end
