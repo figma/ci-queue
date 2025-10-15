@@ -64,8 +64,8 @@ module CI
               idle_since = nil
               yield index.fetch(test)
             else
-              idle_since ||= Time.now
-              if Time.now - idle_since > 120 && !idle_state_printed
+              idle_since ||= CI::Queue.time_now
+              if CI::Queue.time_now - idle_since > 120 && !idle_state_printed
                 puts "Worker #{worker_id} has been idle for 120 seconds. Printing global state..."
                 running_tests = redis.zrange(key('running'), 0, -1, withscores: true)
                 puts "  Processed tests: #{redis.scard(key('processed'))}"
@@ -201,7 +201,7 @@ module CI
               key('worker', worker_id, 'queue'),
               key('owners'),
             ],
-            argv: [Time.now.to_f],
+            argv: [CI::Queue.time_now.to_f],
           )
         end
 
@@ -214,7 +214,7 @@ module CI
               key('worker', worker_id, 'queue'),
               key('owners'),
             ],
-            argv: [Time.now.to_f, timeout],
+            argv: [CI::Queue.time_now.to_f, timeout],
           )
 
           if lost_test.nil? && idle?
