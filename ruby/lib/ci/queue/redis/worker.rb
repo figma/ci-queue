@@ -219,8 +219,9 @@ module CI
               key('processed'),
               key('worker', worker_id, 'queue'),
               key('owners'),
+              key('test-group-timeout'),
             ],
-            argv: [CI::Queue.time_now.to_f],
+            argv: [CI::Queue.time_now.to_f, 'true', config.timeout],
           )
         end
 
@@ -232,8 +233,9 @@ module CI
               key('completed'),
               key('worker', worker_id, 'queue'),
               key('owners'),
+              key('test-group-timeout'),
             ],
-            argv: [CI::Queue.time_now.to_f, timeout],
+            argv: [CI::Queue.time_now.to_f, timeout, 'true', config.timeout],
           )
 
           if lost_test.nil? && idle?
@@ -277,8 +279,8 @@ module CI
 
         def store_chunk_metadata(chunks)
           # Batch operations to avoid exceeding Redis multi operation limits
-          # Each chunk requires 3 commands (set, expire, sadd), so batch conservatively
-          batch_size = 7 # 7 chunks = 21 commands + 1 expire = 22 commands per batch
+          # Each chunk requires 4 commands (set, expire, sadd, hset), so batch conservatively
+          batch_size = 5 # 5 chunks = 20 commands + 2 expires = 22 commands per batch
 
           chunks.each_slice(batch_size) do |chunk_batch|
             redis.multi do |transaction|
@@ -292,8 +294,14 @@ module CI
 
                 # Track all chunks for cleanup
                 transaction.sadd(key('chunks'), chunk.id)
+
+                # Store dynamic timeout for this chunk
+                # Timeout = default_timeout * number_of_tests
+                chunk_timeout = config.timeout * chunk.test_count
+                transaction.hset(key('test-group-timeout'), chunk.id, chunk_timeout)
               end
               transaction.expire(key('chunks'), config.redis_ttl)
+              transaction.expire(key('test-group-timeout'), config.redis_ttl)
             end
           end
         end

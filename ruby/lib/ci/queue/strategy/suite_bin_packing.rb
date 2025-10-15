@@ -62,8 +62,9 @@ module CI
           # If suite fits in max duration, create full_suite chunk
           if total_duration <= max_duration
             chunk_id = "#{suite_name}:full_suite"
-            # Don't store test_ids - worker will resolve from index
-            return [TestChunk.new(chunk_id, suite_name, :full_suite, [], total_duration)]
+            # Don't store test_ids in Redis - worker will resolve from index
+            # But pass test_count for timeout calculation
+            return [TestChunk.new(chunk_id, suite_name, :full_suite, [], total_duration, test_count: suite_tests.size)]
           end
 
           # Suite too large - split into partial_suite chunks
