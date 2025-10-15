@@ -16,6 +16,8 @@ require 'ci/queue/bisect'
 require 'ci/queue/strategy/base'
 require 'ci/queue/strategy/random'
 require 'ci/queue/strategy/timing_based'
+require 'ci/queue/strategy/suite_bin_packing'
+require 'ci/queue/test_chunk'
 
 module CI
   module Queue
@@ -71,6 +73,8 @@ module CI
       case strategy_name&.to_sym
       when :timing_based
         Strategy::TimingBased.new
+      when :suite_bin_packing
+        Strategy::SuiteBinPacking.new
       else
         Strategy::Random.new
       end

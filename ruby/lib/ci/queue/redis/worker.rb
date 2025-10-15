@@ -30,8 +30,19 @@ module CI
 
         def populate(tests, random: Random.new)
           @index = tests.map { |t| [t.id, t] }.to_h
-          tests = Queue.shuffle(tests, random, config: config)
-          push(tests.map(&:id))
+          executables = Queue.shuffle(tests, random, config: config)
+
+          # Separate chunks from individual tests
+          chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
+          individual_tests = executables.select { |e| !e.is_a?(CI::Queue::TestChunk) }
+
+          # Store chunk metadata in Redis (only master does this)
+          store_chunk_metadata(chunks) if chunks.any?
+
+          # Push all IDs to queue (chunks + individual tests)
+          all_ids = chunks.map(&:id) + individual_tests.map(&:id)
+          push(all_ids)
+
           self
         end
 
@@ -60,9 +71,16 @@ module CI
           idle_since = nil
           idle_state_printed = false
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
-            if test = reserve
+            if id = reserve
               idle_since = nil
-              yield index.fetch(test)
+              executable = resolve_executable(id)
+
+              if executable
+                yield executable
+              else
+                warn("Warning: Could not resolve executable for ID #{id.inspect}. Acknowledging to remove from queue.")
+                acknowledge(id)
+              end
             else
               idle_since ||= CI::Queue.time_now
               if CI::Queue.time_now - idle_since > 120 && !idle_state_printed
@@ -121,8 +139,9 @@ module CI
           @build ||= CI::Queue::Redis::BuildRecord.new(self, redis, config)
         end
 
-        def acknowledge(test)
-          test_key = test.id
+        def acknowledge(test_or_id)
+          # Accept either an object with .id or a string ID
+          test_key = test_or_id.respond_to?(:id) ? test_or_id.id : test_or_id
           raise_on_mismatching_test(test_key)
           eval_script(
             :acknowledge,
@@ -252,6 +271,120 @@ module CI
 
         def register
           redis.sadd(key('workers'), [worker_id])
+        end
+
+        private
+
+        def store_chunk_metadata(chunks)
+          # Batch operations to avoid exceeding Redis multi operation limits
+          # Each chunk requires 3 commands (set, expire, sadd), so batch conservatively
+          batch_size = 7 # 7 chunks = 21 commands + 1 expire = 22 commands per batch
+
+          chunks.each_slice(batch_size) do |chunk_batch|
+            redis.multi do |transaction|
+              chunk_batch.each do |chunk|
+                # Store chunk metadata with TTL
+                transaction.set(
+                  key('chunk', chunk.id),
+                  chunk.to_json
+                )
+                transaction.expire(key('chunk', chunk.id), config.redis_ttl)
+
+                # Track all chunks for cleanup
+                transaction.sadd(key('chunks'), chunk.id)
+              end
+              transaction.expire(key('chunks'), config.redis_ttl)
+            end
+          end
+        end
+
+        def chunk_id?(id)
+          id.include?(':full_suite') || id.include?(':chunk_')
+        end
+
+        def resolve_executable(id)
+          # Detect chunk by ID pattern
+          if chunk_id?(id)
+            resolve_chunk(id)
+          else
+            # Regular test - existing behavior
+            index.fetch(id)
+          end
+        end
+
+        def resolve_chunk(chunk_id)
+          # Fetch chunk metadata from Redis
+          chunk_json = redis.get(key('chunk', chunk_id))
+          unless chunk_json
+            warn "Warning: Chunk metadata not found for #{chunk_id}"
+            return nil
+          end
+
+          chunk = CI::Queue::TestChunk.from_json(chunk_id, chunk_json)
+
+          # Resolve test objects based on chunk type
+          test_objects = if chunk.full_suite?
+            resolve_full_suite_tests(chunk.suite_name)
+          else
+            resolve_partial_suite_tests(chunk.test_ids)
+          end
+
+          if test_objects.empty?
+            warn "Warning: No tests found for chunk #{chunk_id}"
+            return nil
+          end
+
+          # Return enriched chunk with actual test objects
+          ResolvedChunk.new(chunk, test_objects)
+        rescue JSON::ParserError => e
+          warn "Warning: Could not parse chunk metadata for #{chunk_id}: #{e.message}"
+          nil
+        rescue KeyError => e
+          warn "Warning: Could not resolve test in chunk #{chunk_id}: #{e.message}"
+          nil
+        end
+
+        def resolve_full_suite_tests(suite_name)
+          # Filter index for all tests from this suite
+          # Tests are added to index during populate() with format "SuiteName#test_method"
+          prefix = "#{suite_name}#"
+          tests = index.select { |test_id, _| test_id.start_with?(prefix) }
+                        .values
+
+          # Sort to maintain consistent order (alphabetical by test name)
+          tests.sort_by(&:id)
+        end
+
+        def resolve_partial_suite_tests(test_ids)
+          # Fetch specific tests from index
+          test_ids.map { |test_id| index.fetch(test_id) }
+        end
+
+        # Represents a chunk with resolved test objects
+        class ResolvedChunk
+          attr_reader :chunk_id, :suite_name, :tests
+
+          def initialize(chunk, tests)
+            @chunk_id = chunk.id
+            @suite_name = chunk.suite_name
+            @tests = tests.freeze
+          end
+
+          def id
+            chunk_id
+          end
+
+          def chunk?
+            true
+          end
+
+          def flaky?
+            tests.any?(&:flaky?)
+          end
+
+          def size
+            tests.size
+          end
         end
       end
     end
