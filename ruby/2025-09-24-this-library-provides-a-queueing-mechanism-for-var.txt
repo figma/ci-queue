@@ -1,0 +1,2819 @@
+╭───────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Code!                         │
+│                                                   │
+│   /help for help, /status for your current setup  │
+│                                                   │
+│   cwd: /Users/ebarajas/figma/ci-queue/ruby        │
+╰───────────────────────────────────────────────────╯
+
+ Tips for getting started:
+
+ 1. Run /init to create a CLAUDE.md file with instructions for Claude
+ 2. Run /terminal-setup to set up terminal integration
+ 3. Use Claude to help with file analysis, editing, bash commands and git
+ 4. Be as specific as you would with another engineer for the best results
+
+> This library provides a queueing mechanism for various unit test runners. I want to update the 
+  Ruby/Minitest integration to support different "strategies" of ordering the queue. At first, I want to 
+  keep the current strategy, and add a new one that supports reading in a test "timing" file and ordering
+   in descending order by the known test duration. If one can't be found, it should fallback to an 
+  estimated value that is configurable (
+  ⎿  Interrupted by user
+
+> This library provides a queueing mechanism for various unit test runners. I want to update the 
+  Ruby/Minitest integration to support different "strategies" of ordering the queue. At first, I want to 
+  keep the current strategy, and add a new one that supports reading in a test "timing" file and ordering
+   in descending order by the known test duration. If one can't be found, it should fallback to an 
+  estimated value that is configurable (let's say this defaults to 100ms). The input file will be a JSON 
+  file with a dictionary where the keys are the test name, in the format 
+  "${test_class_name}#${test_name}", and the value is a tuple of the duration and the result. If the 
+  result is either skipped or failed, we should use the fallback in case actually running the test takes 
+  longer than expected. We expect this will solve an issue with load balancing where longer running tests
+   are placed towards the end of the queue and workers are stuck waiting for a small number of longer 
+  running tests to finish. 
+  Don't write any code yet. Think really hard and come up with a plan, and validate any assumptions I've 
+  made in my instructions. Readability and extensibility should be a priority when creating this 
+  solution.
+
+✻ Thinking…
+
+  The user wants to add a new queuing strategy to the Ruby/Minitest integration in this ci-queue library.
+   Let me understand what they're asking for:
+
+  1. They want to support different "strategies" of ordering the queue
+  2. Keep the current strategy 
+  3. Add a new one that reads a test timing file
+  4. Order tests in descending order by known test duration
+  5. If duration not found, use a configurable fallback (default 100ms)
+  6. Input file is JSON: {"test_class#test_name": [duration, result]}
+  7. If result is "skipped" or "failed", use fallback duration
+  8. Goal is to improve load balancing by putting longer tests earlier in the queue
+
+  I need to:
+  1. First understand the current codebase structure
+  2. See how the current queuing/ordering works
+  3. Identify where strategies should be implemented
+  4. Come up with a clean, extensible design
+  5. Validate the user's assumptions
+
+  Let me start by exploring the codebase to understand the current implementation.
+
+⏺ I'll help you design a strategy system for test ordering in the Ruby/Minitest integration. Let me first
+   explore the codebase to understand the current implementation and then create a comprehensive plan.
+
+⏺ Update Todos
+  ⎿  ☐ Explore current codebase structure and understand existing queuing mechanism
+     ☐ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☐ Design extensible strategy pattern for test ordering
+     ☐ Analyze timing file format and validate assumptions
+     ☐ Create implementation plan with clear interfaces and responsibilities
+
+✻ Thinking…
+
+  I need to start by exploring the codebase structure to understand how the current queuing mechanism 
+  works. Let me look at the overall project structure first.
+
+⏺ Update Todos
+  ⎿  ☐ Explore current codebase structure and understand existing queuing mechanism
+     ☐ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☐ Design extensible strategy pattern for test ordering
+     ☐ Analyze timing file format and validate assumptions
+     ☐ Create implementation plan with clear interfaces and responsibilities
+
+✻ Thinking…
+
+  Let me start by exploring the project structure to understand how it's organized.
+
+⏺ List(..)
+  ⎿  Listed 208 paths (ctrl+r to expand)
+
+✻ Thinking…
+
+  Looking at the directory structure, I can see this is a multi-language project with implementations for
+   JavaScript, Python, and Ruby. The user is asking about the Ruby/Minitest integration specifically. Let
+   me explore the Ruby directory structure more closely to understand the current implementation.
+
+  From what I can see:
+  - ruby/lib/ci/queue/ - contains the core queue logic 
+  - ruby/lib/minitest/queue/ - contains minitest-specific implementations
+  - ruby/exe/minitest-queue - the executable
+  - ruby/lib/ci/queue/redis/worker.rb - this was the file the user opened, so it's relevant
+
+  Let me look at the minitest integration files to understand how tests are currently ordered/queued.
+
+⏺ List(lib)
+  ⎿  Listed 54 paths (ctrl+r to expand)
+
+✻ Thinking…
+
+  Let me examine the main files to understand the current architecture. I'll start with the main entry 
+  points and then dive into the specifics of test ordering.
+
+⏺ Read(lib/minitest/queue.rb)
+  ⎿  Read 283 lines (ctrl+r to expand)
+
+⏺ Read(lib/ci/queue.rb)
+  ⎿  Read 56 lines (ctrl+r to expand)
+
+⏺ Read(exe/minitest-queue)
+  ⎿  Read 5 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Now I need to look at the runner to understand how tests are loaded and queued, and then examine the 
+  queue implementations. Let me check the runner file:
+
+⏺ Read(lib/minitest/queue/runner.rb)
+  ⎿  Read 623 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Now I can see how the current system works. The key parts are:
+
+  1. In runner.rb:297, tests are populated into the queue with populate_queue which calls:
+  Minitest.queue.populate(Minitest.loaded_tests, random: ordering_seed, &:id)
+  2. The loaded_tests method in /Users/ebarajas/figma/ci-queue/ruby/lib/minitest/queue.rb:203-209 returns
+   a flat list of SingleExample objects:
+  def loaded_tests
+    Minitest::Test.runnables.flat_map do |runnable|
+      runnable.runnable_methods.map do |method_name|
+        SingleExample.new(runnable, method_name)
+      end
+    end
+  end
+  3. The SingleExample.id method (line 158) returns "#{@runnable}##{@method_name}" which matches the 
+  format the user mentioned.
+  4. Looking at /Users/ebarajas/figma/ci-queue/ruby/lib/ci/queue.rb:31-37, there's already a shuffling 
+  mechanism:
+  def shuffle(tests, random)
+    if shuffler
+      shuffler.call(tests, random)
+    else
+      tests.sort.shuffle(random: random)
+    end
+  end
+
+  So the current system uses a shuffle approach with a pluggable shuffler callback. Now I need to 
+  understand how the queue implementations work to see where to add the strategy system.
+
+  Let me look at the queue implementations:
+
+⏺ Update Todos
+  ⎿  ☒ Explore current codebase structure and understand existing queuing mechanism
+     ☐ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☐ Design extensible strategy pattern for test ordering
+     ☐ Analyze timing file format and validate assumptions
+     ☐ Create implementation plan with clear interfaces and responsibilities
+
+✻ Thinking…
+
+  Now let me examine the queue implementation to understand how the populate method works and where the 
+  ordering happens:
+
+⏺ Search(pattern: "def populate", path: "lib")
+  ⎿  Found 4 files (ctrl+r to expand)
+
+✻ Thinking…
+
+  Let me look at the static queue implementation and the redis worker to understand how populate works:
+
+⏺ Read(lib/ci/queue/static.rb)
+  ⎿  Read 118 lines (ctrl+r to expand)
+
+⏺ Read(lib/ci/queue/redis/worker.rb)
+  ⎿  Read 260 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Perfect! Now I can see how the current ordering works:
+
+  1. In the Redis Worker (line 31-36):
+  def populate(tests, random: Random.new)
+    @index = tests.map { |t| [t.id, t] }.to_h
+    tests = Queue.shuffle(tests, random)  # <-- THIS IS WHERE ORDERING HAPPENS
+    push(tests.map(&:id))
+    self
+  end
+  2. And from the main Queue module I read earlier (ci/queue.rb:31-37), Queue.shuffle calls either a 
+  custom shuffler or the default sort+shuffle:
+  def shuffle(tests, random)
+    if shuffler
+      shuffler.call(tests, random)
+    else
+      tests.sort.shuffle(random: random)  # <-- DEFAULT BEHAVIOR
+    end
+  end
+
+  So the current system:
+  - Has a pluggable shuffler mechanism via CI::Queue.shuffler
+  - Default behavior is to sort tests alphabetically and then shuffle them randomly
+  - This happens at the populate phase before pushing to Redis
+  - The shuffle affects both Redis and Static queue implementations
+
+  Now let me complete understanding the current system and then design the strategy system:
+
+⏺ Update Todos
+  ⎿  ☒ Explore current codebase structure and understand existing queuing mechanism
+     ☒ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☐ Analyze timing file format and validate assumptions
+     ☐ Design extensible strategy pattern for test ordering
+     ☐ Create implementation plan with clear interfaces and responsibilities
+
+✻ Thinking…
+
+  Now let me analyze the timing file format and validate the user's assumptions:
+
+  The user specified:
+  1. JSON file format 
+  2. Dictionary where keys are test names in format "${test_class_name}#${test_name}"
+  3. Values are tuples [duration, result]
+  4. If result is "skipped" or "failed", use fallback duration 
+  5. Default fallback is 100ms
+
+  This matches perfectly with the SingleExample.id format I saw in the minitest integration: 
+  "#{@runnable}##{@method_name}" which becomes something like "MyTestClass#test_something".
+
+  Let me check if there are any existing test timing mechanisms in this codebase:
+
+⏺ Search(pattern: "timing|duration|time", path: "lib")
+  ⎿  Found 20 files (ctrl+r to expand)
+
+✻ Thinking…
+
+  There are existing test time tracking mechanisms! Let me examine the test time related files:
+
+⏺ Read(lib/minitest/queue/test_time_recorder.rb)
+  ⎿  Read 18 lines (ctrl+r to expand)
+
+⏺ Read(lib/ci/queue/redis/test_time_record.rb)
+  ⎿  Read 66 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Interesting! There's already a test time tracking system in place. Let me also check the test time 
+  reporter to understand the output format:
+
+⏺ Read(lib/minitest/queue/test_time_reporter.rb)
+  ⎿  Read 71 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Now I have a complete understanding of the current system and can validate the user's assumptions and 
+  move to the design phase:
+
+  Current System Analysis:
+
+  1. Test Loading: Tests are loaded via loaded_tests method which creates SingleExample objects with id 
+  format "TestClass#test_method"
+  2. Current Ordering: Tests are ordered via CI::Queue.shuffle(tests, random) which either:
+    - Uses a custom CI::Queue.shuffler callback if set 
+    - Default: tests.sort.shuffle(random: random) (alphabetical + random shuffle)
+  3. Existing Timing System: There's already a test time tracking system that:
+    - Records test durations in Redis (TestTimeRecord)
+    - Can export timing data via TestTimeReporter 
+    - Tracks durations in milliseconds
+    - Only records passed tests (line 11 in test_time_recorder.rb)
+
+  User's Requirements Analysis:
+
+  ✅ Test ID Format: Matches exactly - "#{test_class}##{test_method}"✅ JSON Input: Reasonable and 
+  standard✅ Duration + Result Tuple: Makes sense - [duration, result]✅ Skip failed/skipped tests: Good 
+  for load balancing (unreliable timing)✅ Fallback duration: Essential for unknown tests✅ Descending 
+  order: Logical for load balancing (longest tests first)  
+
+  Potential Issues to Address:
+
+  1. Integration with existing shuffle: Need to work alongside current shuffler mechanism
+  2. Configuration: Need to specify timing file path and fallback duration  
+  3. Graceful fallbacks: If file missing, corrupt, or partially missing data
+  4. Strategy interface: Need clean way to switch between current shuffle vs timing-based
+  5. File format validation: JSON parsing errors, invalid format handling
+
+  Let me move to the design phase:
+
+⏺ Update Todos
+  ⎿  ☒ Explore current codebase structure and understand existing queuing mechanism
+     ☒ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☒ Analyze timing file format and validate assumptions
+     ☐ Design extensible strategy pattern for test ordering
+     ☐ Create implementation plan with clear interfaces and responsibilities
+
+✻ Thinking…
+
+  Now let me design the extensible strategy pattern for test ordering and create the implementation plan.
+
+  Strategy Pattern Design
+
+  Based on my analysis, here's what I think the best approach would be:
+
+  Current State
+
+  - Tests are ordered via CI::Queue.shuffle(tests, random) in redis/worker.rb:33
+  - This calls either a custom CI::Queue.shuffler callback or default tests.sort.shuffle(random: random)
+
+  Proposed Design
+
+  1. Replace shuffler with strategy pattern: Instead of a single shuffler callback, use a strategy 
+  interface that can handle different ordering algorithms
+  2. Strategy Interface: Create a base strategy class with a standard interface
+  class CI::Queue::Strategy::Base
+    def order_tests(tests, random: Random.new, config:)
+      # Override in subclasses
+    end
+  end
+  3. Concrete Strategies:
+    - CI::Queue::Strategy::Random (current behavior) 
+    - CI::Queue::Strategy::TimingBased (new timing-based strategy)
+  4. Configuration: Add strategy selection to the configuration system
+  5. Backward Compatibility: Keep the existing shuffler callback for custom use cases
+
+  Strategy Implementation Details
+
+  Random Strategy (preserve current behavior):
+  class CI::Queue::Strategy::Random < Base
+    def order_tests(tests, random: Random.new, config:)
+      tests.sort.shuffle(random: random)
+    end
+  end
+
+  Timing-Based Strategy:
+  class CI::Queue::Strategy::TimingBased < Base
+    def order_tests(tests, random: Random.new, config:)
+      # 1. Load timing data from JSON file
+      # 2. Sort by duration (descending) with fallback
+      # 3. Handle missing/failed tests with fallback duration
+    end
+
+
+
+  I'll design a flexible test ordering mechanism that allows dynamic strategy selection and 
+  configuration. The approach provides a clean, extensible way to implement different test ordering 
+  algorithms while maintaining existing functionality.
+
+  The strategy pattern enables easy addition of new ordering methods like timing-based sorting, with 
+  minimal changes to the core queuing system. Configuration options will allow fine-grained control over 
+  test ordering behavior.
+
+  Key implementation points include creating a base strategy class, defining concrete strategies, and 
+  integrating the new approach with the existing configuration and shuffling mechanisms.
+
+⏺ Update Todos
+  ⎿  ☒ Explore current codebase structure and understand existing queuing mechanism
+     ☒ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☒ Design extensible strategy pattern for test ordering
+     ☒ Analyze timing file format and validate assumptions
+     ☐ Create implementation plan with clear interfaces and responsibilities
+
+✻ Thinking…
+
+  Now let me finalize the implementation plan with clear step-by-step details:
+
+⏺ Update Todos
+  ⎿  ☒ Explore current codebase structure and understand existing queuing mechanism
+     ☒ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☒ Design extensible strategy pattern for test ordering
+     ☒ Analyze timing file format and validate assumptions
+     ☒ Create implementation plan with clear interfaces and responsibilities
+
+✻ Thinking…
+
+  Great! I've completed my analysis and planning. Now let me provide the user with my comprehensive plan 
+  and validate any assumptions they made.
+
+⏺ Plan: Test Ordering Strategy System for Ruby/Minitest Integration
+
+  Analysis & Validation
+
+  Your requirements are well-aligned with the existing codebase. Here's what I found:
+
+  ✅ Test ID Format: Perfect match - the system already uses "#{test_class}##{test_method}" format✅ JSON
+   Timing File: Straightforward to implement with your [duration, result] tuple format✅ Existing 
+  Infrastructure: There's already a test timing system that could be leveraged✅ Load Balancing Goal:
+  Makes complete sense - putting longer tests first prevents workers waiting
+
+  Current System Architecture
+
+  The current ordering happens in ci/queue/redis/worker.rb:33:
+  tests = Queue.shuffle(tests, random)  # Current ordering point
+
+  This calls CI::Queue.shuffle which supports a pluggable shuffler callback or defaults to
+  tests.sort.shuffle(random: random).
+
+  Proposed Design: Strategy Pattern
+
+  1. Strategy Interface
+  # lib/ci/queue/strategy/base.rb
+  class CI::Queue::Strategy::Base
+    def order_tests(tests, random: Random.new, config:)
+      raise NotImplementedError
+    end
+  end
+
+  2. Concrete Strategies
+
+  Random Strategy (preserve existing behavior):
+  # lib/ci/queue/strategy/random.rb
+  class CI::Queue::Strategy::Random < Base
+    def order_tests(tests, random: Random.new, config:)
+      tests.sort.shuffle(random: random)
+    end
+  end
+
+  Timing-Based Strategy (your new requirement):
+  # lib/ci/queue/strategy/timing_based.rb  
+  class CI::Queue::Strategy::TimingBased < Base
+    def order_tests(tests, random: Random.new, config:)
+      timing_data = load_timing_data(config.timing_file)
+
+      tests.sort_by do |test|
+        duration = get_test_duration(test.id, timing_data, config.timing_fallback_duration)
+        -duration # Negative for descending order (longest first)
+      end
+    end
+
+    private
+
+    def load_timing_data(file_path)
+      # Parse JSON: {"TestClass#test_method": [duration_ms, result]}
+    end
+
+    def get_test_duration(test_id, timing_data, fallback_duration)
+      entry = timing_data[test_id]
+      return fallback_duration unless entry
+
+      duration, result = entry
+      # Use fallback for failed/skipped tests per your requirement
+      return fallback_duration if %w[failed skipped].include?(result.to_s.downcase)
+
+      duration.to_f
+    end
+  end
+
+  3. Configuration Extension
+
+  Add to CI::Queue::Configuration:
+  - strategy - symbol (:random, :timing_based)
+  - timing_file - path to JSON file
+  - timing_fallback_duration - default duration in ms (default: 100)
+
+  4. CLI Integration
+
+  Add to minitest/queue/runner.rb parser:
+  - --strategy STRATEGY - choose ordering strategy
+  - --timing-file PATH - path to timing file
+  - --timing-fallback DURATION - fallback duration in ms
+
+  5. Backward Compatibility
+
+  Keep existing CI::Queue.shuffler callback working alongside the new strategy system.
+
+  Implementation Steps
+
+  1. Create Strategy Base Class - Define interface
+  2. Implement Random Strategy - Extract existing behavior
+  3. Implement TimingBased Strategy - Core new functionality
+  4. Update Configuration - Add new config options
+  5. Modify Core Queue.shuffle - Use strategy pattern
+  6. Update Runner CLI - Add new command line options
+  7. Add Tests - Unit tests for strategies and integration tests
+  8. Update Documentation - Document new options
+
+  File Structure
+
+  lib/ci/queue/
+  ├── strategy/
+  │   ├── base.rb           # Strategy interface
+  │   ├── random.rb         # Current behavior
+  │   └── timing_based.rb   # New timing strategy
+  ├── configuration.rb      # Extended with new options
+  └── redis/worker.rb       # Modified to use strategies
+
+  Error Handling & Edge Cases
+
+  - Missing timing file: Graceful fallback to random strategy with warning
+  - Malformed JSON: Parse error handling with fallback
+  - Partially missing timing data: Mixed approach (timed + fallback tests)
+  - File read permissions: Clear error messages
+
+  Benefits of This Design
+
+  ✅ Extensible: Easy to add new strategies (e.g., historical performance-based)✅ Maintainable: Clear
+  separation of concerns✅ Backward Compatible: Existing functionality preserved✅ Configurable: Multiple
+   configuration methods✅ Testable: Each strategy can be unit tested independently
+
+  Does this plan address your requirements correctly? Any concerns or adjustments you'd like me to make 
+  before implementation?
+
+> This looks great so far. Let's add one additional thing
+  Currently I've added the test timing as a custom plugin, however I think it's better suited to live 
+  inside this library. The library already records test timings as you noticed, let's extend it to 
+  support outputting the test timing to a JSON file.
+
+✻ Thinking…
+
+  The user wants to extend the existing timing functionality in the library to output test timing data to
+   a JSON file. Looking at what I found earlier:
+
+  1. The library already has test timing functionality:
+    - minitest/queue/test_time_recorder.rb - records test times during execution
+    - ci/queue/redis/test_time_record.rb - stores test times in Redis
+    - minitest/queue/test_time_reporter.rb - reports on test times
+  2. The current system:
+    - Records test times in Redis during execution
+    - Can report on tests that exceed time limits
+    - Already tracks test duration in milliseconds
+    - Already has the test name in the right format
+
+  So the user wants to extend this to also output to a JSON file in the format they specified: 
+  {"TestClass#test_method": [duration_ms, result]}.
+
+  I should update my plan to include:
+  1. Extending the existing test time recorder to optionally write to JSON file
+  2. Making sure we capture the test result (passed/failed/skipped) along with timing
+  3. Adding configuration for the JSON output file path
+  4. Making this integrate well with the strategy system
+
+  Let me add this to the plan.
+
+⏺ Excellent idea! That makes the system much more cohesive. Let me update the plan to integrate JSON
+  timing export into the existing timing infrastructure.
+
+⏺ Update Todos
+  ⎿  ☒ Explore current codebase structure and understand existing queuing mechanism
+     ☒ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☒ Design extensible strategy pattern for test ordering
+     ☒ Analyze timing file format and validate assumptions
+     ☒ Create implementation plan with clear interfaces and responsibilities
+     ☐ Update plan to include JSON timing export functionality
+
+✻ Thinking…
+
+  Looking at the existing timing infrastructure, I need to understand how to best integrate the JSON 
+  export:
+
+  1. Current TestTimeRecorder: Records only passed tests and duration in 
+  minitest/queue/test_time_recorder.rb:11-14
+  2. Missing piece: We need to capture the test result (passed/failed/skipped) along with duration
+  3. Output location: Currently only stores in Redis, need to add JSON file output
+  4. Integration: This should work well with the strategy system - the same JSON file that gets written 
+  can be read by the TimingBased strategy
+
+  Key considerations:
+  - Need to record ALL tests (not just passed ones) with their results
+  - Need to write to JSON file at the end of the run or incrementally
+  - Format should match what the strategy expects: {"TestClass#test_method": [duration_ms, "result"]}
+  - Should integrate with existing configuration system
+  - Should be optional (controlled by CLI flag)
+
+  Let me update the plan accordingly.
+  ⎿  Interrupted by user
+
+> One correction on your thinking. In this case, I think it's fine to only record the test timing of 
+  successful test results and then fallback to a default value in another case since that's effectively 
+  what we were planning on doing. Then the json format can just be {"TestClass#test_method": duration_ms}
+
+✻ Thinking…
+
+  The user is simplifying the JSON format and the recording logic. Instead of:
+  - Recording all tests with [duration, result] tuples and then filtering during strategy execution
+  - They want to only record successful tests in the first place
+  - And use a simpler JSON format: {"TestClass#test_method": duration_ms}
+
+  This is actually cleaner! It means:
+  1. The TestTimeRecorder only records successful tests (duration only, no result needed)
+  2. The JSON export is simpler: just test_id -> duration mapping
+  3. The TimingBased strategy becomes simpler - if a test isn't in the timing data, use fallback
+
+  Let me update the plan accordingly.
+
+⏺ Perfect! That's much cleaner. Let me update the plan with this simpler approach.
+
+⏺ Update Todos
+  ⎿  ☒ Explore current codebase structure and understand existing queuing mechanism
+     ☒ Identify current test ordering/queueing logic in Ruby/Minitest integration
+     ☒ Design extensible strategy pattern for test ordering
+     ☒ Update plan to include JSON timing export functionality
+     ☒ Analyze timing file format and validate assumptions
+     ☒ Create implementation plan with clear interfaces and responsibilities
+
+✻ Thinking…
+
+  Great! This simplifies things significantly:
+
+  1. JSON Format: Just {"TestClass#test_method": duration_ms} - much cleaner
+  2. Recording Logic: Only record successful tests (which is what TestTimeRecorder already does at 
+  lib/minitest/queue/test_time_recorder.rb:11 return unless test.passed?)  
+  3. Strategy Logic: If test not in JSON, use fallback - simple!
+
+  So the updated plan:
+
+  Updated JSON Timing Export Integration
+
+  Current System: TestTimeRecorder already only records passed tests and stores them in Redis.
+
+  New Addition: Export that Redis timing data to JSON format for the next run.
+
+  Modified Components:
+
+  1. TestTimeReporter Enhancement - Add JSON export capability
+  2. CLI Options - Add --export-timing-file PATH 
+  3. TimingBased Strategy - Simplified to just check existence in timing data
+  4. Configuration - Add timing export file option
+
+  Let me show the updated design.
+
+⏺ Updated Plan: Integrated JSON Timing Export + Strategy System
+
+  JSON Timing Export Enhancement
+
+  Perfect! The existing TestTimeRecorder already only records successful tests (return unless 
+  test.passed?). We just need to add JSON export capability.
+
+  Enhanced TestTimeReporter:
+  # lib/minitest/queue/test_time_reporter.rb (enhanced)
+  class TestTimeReporter < Minitest::Reporters::BaseReporter
+    def initialize(build:, limit: nil, percentile: nil, export_file: nil, **options)
+      # ... existing code ...
+      @export_file = export_file
+    end
+
+    def report
+      # ... existing report logic ...
+      export_timing_data if @export_file
+    end
+
+    private
+
+    def export_timing_data
+      # Convert test_time_hash to simple format: {"TestClass#method": avg_duration_ms}
+      timing_data = test_time_hash.transform_values do |durations|
+        durations.sum / durations.size  # Average duration
+      end
+
+      File.write(@export_file, JSON.pretty_generate(timing_data))
+      puts "Exported timing data to #{@export_file}"
+    end
+  end
+
+  CLI Integration (add to runner.rb):
+  opts.on('--export-timing-file FILE', 'Export test timing data to JSON file') do |file|
+    queue_config.export_timing_file = file
+  end
+
+  Wire it up in Runner (run_command method):
+  reporters << TestTimeReporter.new(
+    build: test_time_record,
+    export_file: queue_config.export_timing_file
+  ) if queue_config.track_test_duration
+
+  Simplified TimingBased Strategy
+
+  Much cleaner now:
+
+  # lib/ci/queue/strategy/timing_based.rb  
+  class CI::Queue::Strategy::TimingBased < Base
+    def order_tests(tests, random: Random.new, config:)
+      timing_data = load_timing_data(config.timing_file)
+
+      tests.sort_by do |test|
+        duration = timing_data[test.id] || config.timing_fallback_duration
+        -duration # Negative for descending order (longest first)
+      end
+    end
+
+    private
+
+    def load_timing_data(file_path)
+      return {} unless file_path && File.exist?(file_path)
+      JSON.parse(File.read(file_path))
+    rescue JSON::ParserError => e
+      warn "Warning: Could not parse timing file #{file_path}: #{e.message}"
+      {}
+    end
+  end
+
+  Updated Implementation Steps
+
+  1. Create Strategy System - Base class + Random + TimingBased strategies
+  2. Enhance TestTimeReporter - Add JSON export capability
+  3. Update Configuration - Add strategy, timing_file, timing_fallback_duration, export_timing_file
+  4. Update CLI - Add all new options (--strategy, --timing-file, --timing-fallback,
+  --export-timing-file)
+  5. Modify Core Queue.shuffle - Use strategy pattern
+  6. Integration - Wire up TestTimeReporter with export in Runner
+  7. Tests - Unit and integration tests
+  8. Documentation - Update CLI help and README
+
+  Complete Workflow
+
+  Run 1 (Bootstrap):
+  minitest-queue --track-test-duration --export-timing-file timing.json run
+  → Creates timing.json with successful test durations
+
+  Run 2+ (Optimized):
+  minitest-queue --strategy timing_based --timing-file timing.json run
+  → Uses timing data to order tests (longest first)
+
+  Updated CLI Options
+
+  --strategy STRATEGY           Test ordering strategy: random, timing_based (default: random)
+  --timing-file PATH           Path to JSON timing file for timing_based strategy
+  --timing-fallback DURATION  Fallback duration in ms for unknown tests (default: 100)
+  --export-timing-file PATH    Export test timing data to JSON file after run
+
+  Benefits of Simplified Design
+
+  ✅ Simpler JSON Format: Just test_id → duration mapping✅ Cleaner Logic: Only record successful tests,
+  fallback for others✅ Self-Contained: Library handles both timing collection and export✅ Easy 
+  Migration: Existing timing infrastructure leveraged✅ Flexible: Can still use external timing files if
+  needed
+
+  This covers everything you wanted - integrated timing export plus the strategy system. Does this 
+  updated approach look good to proceed with?
+
+> This looks great! Let's proceed
+  ⎿  User rejected Claude's plan:
+     ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+     │ Implementation Plan: Test Ordering Strategy System + JSON Timing Export                          │
+     │                                                                                                  │
+     │ Features to Implement                                                                            │
+     │                                                                                                  │
+     │ 1. Strategy Pattern for Test Ordering                                                            │
+     │   - Base strategy interface                                                                      │
+     │   - Random strategy (current behavior)                                                           │
+     │   - TimingBased strategy (longest tests first)                                                   │
+     │ 2. Enhanced JSON Timing Export                                                                   │
+     │   - Extend existing TestTimeReporter to export JSON                                              │
+     │   - Simple format: {"TestClass#method": avg_duration_ms}                                         │
+     │   - Only successful test timings recorded                                                        │
+     │ 3. Configuration & CLI Integration                                                               │
+     │   - New config options: strategy, timing_file, timing_fallback_duration, export_timing_file      │
+     │   - CLI flags: --strategy, --timing-file, --timing-fallback, --export-timing-file                │
+     │   - Wire up strategy system in core Queue.shuffle                                                │
+     │                                                                                                  │
+     │ Implementation Steps                                                                             │
+     │                                                                                                  │
+     │ 1. Create strategy base class and implementations                                                │
+     │ 2. Enhance TestTimeReporter with JSON export                                                     │
+     │ 3. Update Configuration class with new options                                                   │
+     │ 4. Modify core Queue.shuffle to use strategies                                                   │
+     │ 5. Add CLI options to Runner                                                                     │
+     │ 6. Integration and testing                                                                       │
+     │                                                                                                  │
+     │ Workflow                                                                                         │
+     │                                                                                                  │
+     │ - Bootstrap run: minitest-queue --track-test-duration --export-timing-file timing.json run       │
+     │ - Optimized runs: minitest-queue --strategy timing_based --timing-file timing.json run           │
+     │                                                                                                  │
+     │ This will solve the load balancing issue by placing longer tests first, preventing workers from  │
+     │ waiting on a few long-running tests at the end.                                                  │
+     ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+> I want to be sure that --track-test-duration and --strategy timing_based aren't mutually exclusive. 
+  Ideally after the first bootstrap run, we'd always be updating test duration. 
+  I also want to be sure that the JSON export only happens on the when the report command is called, and 
+  not on each individual worker that is running
+
+⏺ Excellent points! Let me clarify these important details:
+
+⏺ Update Todos
+  ⎿  ☐ Clarify timing recording vs strategy usage interaction                   
+     ☐ Ensure JSON export only happens in report command, not individual workers
+     ☐ Design proper workflow for continuous timing updates
+
+⏺ You're absolutely right! Let me analyze the current flow and fix these issues:
+
+⏺ Search(pattern: "report.*command", path: "lib/minitest/queue/runner.rb", output_mode: "content")
+  ⎿  Found 47 lines (ctrl+r to expand)
+
+⏺ Read(lib/minitest/queue/runner.rb)
+  ⎿  Read 30 lines (ctrl+r to expand)
+
+⏺ Update Todos
+  ⎿  ☒ Clarify timing recording vs strategy usage interaction                   
+     ☒ Ensure JSON export only happens in report command, not individual workers
+     ☒ Design proper workflow for continuous timing updates
+
+⏺ Perfect observations! Here's the corrected design:
+
+  Corrected Design: Continuous Timing Updates + Report-Only Export
+
+  1. Timing Recording vs Strategy Usage
+
+  These should always work together after bootstrap:
+
+  Corrected Workflow:
+  # Bootstrap (first run)
+  minitest-queue --track-test-duration run  # Workers record timing
+  minitest-queue report --export-timing-file timing.json  # Export JSON
+
+  # Subsequent runs (optimal)  
+  minitest-queue --track-test-duration --strategy timing_based --timing-file timing.json run
+  minitest-queue report --export-timing-file timing.json  # Update JSON with new timings
+
+  Key Points:
+  - --track-test-duration should always be used to keep timing data fresh
+  - --strategy timing_based uses existing timing file for ordering
+  - Workers continuously update timing data, report command exports it
+
+  2. JSON Export Location
+
+  You're absolutely right - JSON export belongs in the report command only:
+
+  Current Architecture:
+  - Workers (run command): Record timing data to Redis
+  - Report (report command): Aggregates results and generates reports
+
+  Enhanced TestTimeReporter (used in report_command):
+  # In report_command method, alongside existing BuildStatusReporter
+  if queue_config.track_test_duration
+    test_time_record = CI::Queue::Redis::TestTimeRecord.new(queue_url, queue_config)
+    test_time_reporter = TestTimeReporter.new(
+      build: test_time_record,
+      limit: queue_config.max_test_duration,
+      percentile: queue_config.max_test_duration_percentile,
+      export_file: queue_config.export_timing_file  # NEW
+    )
+    test_time_reporter.report
+  end
+
+  3. Updated CLI Design
+
+  For Workers (run command):
+  --strategy STRATEGY         # Test ordering strategy (default: random)  
+  --timing-file PATH         # Input timing file for timing_based strategy
+  --timing-fallback DURATION # Fallback for unknown tests (default: 100ms)
+  --track-test-duration      # Record timing data (recommended always on)
+
+  For Report (report command):
+  --export-timing-file PATH  # Export aggregated timing data to JSON
+  --track-test-duration      # Must match workers for timing export
+
+  4. Complete Production Workflow
+
+  # CI Pipeline setup
+  COMMON_FLAGS="--track-test-duration --strategy timing_based --timing-file timing.json"
+
+  # Workers (parallel)
+  minitest-queue $COMMON_FLAGS run test/unit/*
+  minitest-queue $COMMON_FLAGS run test/integration/*
+  minitest-queue $COMMON_FLAGS run test/system/*
+
+  # Report (single, after all workers)
+  minitest-queue report --export-timing-file timing.json
+
+  Benefits:
+  - ✅ Timing data stays fresh on every run
+  - ✅ Test ordering gets better over time
+  - ✅ JSON export happens once per build in report
+  - ✅ No file I/O conflicts between workers
+  - ✅ Works with existing CI patterns
+
+  Does this corrected design address your concerns properly?
+
+> Yes! Let's proceed
+
+⏺ Perfect! Let's start implementing this system.
+
+⏺ Update Todos
+  ⎿  ☐ Create strategy base class and interface            
+     ☐ Implement Random strategy (extract current behavior)
+     ☐ Implement TimingBased strategy
+     ☐ Modify core Queue.shuffle to use strategies
+     ☐ Update Configuration class with new options
+     ☐ Enhance TestTimeReporter with JSON export
+     ☐ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Update Todos
+  ⎿  ☐ Create strategy base class and interface            
+     ☐ Implement Random strategy (extract current behavior)
+     ☐ Implement TimingBased strategy
+     ☐ Modify core Queue.shuffle to use strategies
+     ☐ Update Configuration class with new options
+     ☐ Enhance TestTimeReporter with JSON export
+     ☐ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Let's start by creating the strategy base class:
+
+⏺ Write(lib/ci/queue/strategy/base.rb)
+  ⎿  Wrote 13 lines to lib/ci/queue/strategy/base.rb                                 
+     # frozen_string_literal: true
+     module CI
+       module Queue
+         module Strategy
+           class Base
+             def order_tests(tests, random: Random.new, config: nil)
+               raise NotImplementedError, "#{self.class} must implement #order_tests"
+             end
+           end
+     … +3 lines (ctrl+r to expand)
+
+⏺ Update Todos
+  ⎿  ☒ Create strategy base class and interface            
+     ☐ Implement Random strategy (extract current behavior)
+     ☐ Implement TimingBased strategy
+     ☐ Modify core Queue.shuffle to use strategies
+     ☐ Update Configuration class with new options
+     ☐ Enhance TestTimeReporter with JSON export
+     ☐ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Now let's implement the Random strategy that preserves the current behavior:
+
+⏺ Write(lib/ci/queue/strategy/random.rb)
+  ⎿  Wrote 14 lines to lib/ci/queue/strategy/random.rb              
+     # frozen_string_literal: true
+     require_relative 'base'
+     module CI
+       module Queue
+         module Strategy
+           class Random < Base
+             def order_tests(tests, random: Random.new, config: nil)
+               tests.sort.shuffle(random: random)
+             end
+     … +4 lines (ctrl+r to expand)
+
+⏺ Update Todos
+  ⎿  ☒ Create strategy base class and interface            
+     ☒ Implement Random strategy (extract current behavior)
+     ☐ Implement TimingBased strategy
+     ☐ Modify core Queue.shuffle to use strategies
+     ☐ Update Configuration class with new options
+     ☐ Enhance TestTimeReporter with JSON export
+     ☐ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Now let's implement the TimingBased strategy:
+
+⏺ Write(lib/ci/queue/strategy/timing_based.rb)
+  ⎿  Wrote 35 lines to lib/ci/queue/strategy/timing_based.rb        
+     # frozen_string_literal: true
+     require_relative 'base'
+     require 'json'
+     module CI
+       module Queue
+         module Strategy
+           class TimingBased < Base
+             def order_tests(tests, random: Random.new, config: nil)
+               timing_data = load_timing_data(config&.timing_file)
+     … +25 lines (ctrl+r to expand)
+
+⏺ Update Todos
+  ⎿  ☒ Create strategy base class and interface            
+     ☒ Implement Random strategy (extract current behavior)
+     ☒ Implement TimingBased strategy
+     ☐ Update Configuration class with new options
+     ☐ Modify core Queue.shuffle to use strategies
+     ☐ Enhance TestTimeReporter with JSON export
+     ☐ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Now let's update the Configuration class. First, let's see what it looks like:
+
+⏺ Read(lib/ci/queue/configuration.rb)
+  ⎿  Read 132 lines (ctrl+r to expand)
+
+⏺ Now let's update the Configuration class to add the new options:
+
+⏺ Update(lib/ci/queue/configuration.rb)
+  ⎿  Updated lib/ci/queue/configuration.rb with 1 addition                                              
+        8          attr_accessor :requeue_tolerance, :namespace, :failing_test, :statsd_endpoint
+        9          attr_accessor :max_test_duration, :max_test_duration_percentile, :track_test_duration
+       10          attr_accessor :max_test_failed, :redis_ttl
+       11 +        attr_accessor :strategy, :timing_file, :timing_fallback_duration, :export_timing_file
+       12          attr_reader :circuit_breakers
+       13          attr_writer :seed, :build_id
+       14          attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
+
+⏺ Update(lib/ci/queue/configuration.rb)
+  ⎿  Updated lib/ci/queue/configuration.rb with 2 additions and 1 removal                                
+       52            grind_count: nil, max_duration: nil, failure_file: nil, max_test_duration: nil,
+       53            max_test_duration_percentile: 0.5, track_test_duration: false, max_test_failed: nil,
+       54            queue_init_timeout: nil, redis_ttl: 8 * 60 * 60, report_timeout: nil, 
+            inactive_workers_timeout: nil,
+       55 -          export_flaky_tests_file: nil, known_flaky_tests: []
+       55 +          export_flaky_tests_file: nil, known_flaky_tests: [],
+       56 +          strategy: :random, timing_file: nil, timing_fallback_duration: 100.0, 
+          + export_timing_file: nil
+       57          )
+       58            @build_id = build_id
+       59            @circuit_breakers = [CircuitBreaker::Disabled]
+
+⏺ Now let's add the initialization of these new attributes:
+
+⏺ Update(lib/ci/queue/configuration.rb)
+  ⎿  Updated lib/ci/queue/configuration.rb with 4 additions              
+       79            @report_timeout = report_timeout
+       80            @inactive_workers_timeout = inactive_workers_timeout
+       81            @export_flaky_tests_file = export_flaky_tests_file
+       82 +          @strategy = strategy
+       83 +          @timing_file = timing_file
+       84 +          @timing_fallback_duration = timing_fallback_duration
+       85 +          @export_timing_file = export_timing_file
+       86          end
+       87    
+       88          def queue_init_timeout
+
+⏺ Update Todos
+  ⎿  ☒ Create strategy base class and interface            
+     ☒ Implement Random strategy (extract current behavior)
+     ☒ Implement TimingBased strategy
+     ☒ Update Configuration class with new options
+     ☐ Modify core Queue.shuffle to use strategies
+     ☐ Enhance TestTimeReporter with JSON export
+     ☐ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Now let's modify the core Queue.shuffle method to use strategies. Let's look at the current
+  implementation:
+
+⏺ Read(lib/ci/queue.rb)
+  ⎿  Read 10 lines (ctrl+r to expand)
+
+⏺ Perfect! Now let's modify this method to use strategies. We need to add requires and update the method:
+
+⏺ Update(lib/ci/queue.rb)
+  ⎿  Updated lib/ci/queue.rb with 3 additions        
+       13    require 'ci/queue/file'
+       14    require 'ci/queue/grind'
+       15    require 'ci/queue/bisect'
+       16 +  require 'ci/queue/strategy/base'
+       17 +  require 'ci/queue/strategy/random'
+       18 +  require 'ci/queue/strategy/timing_based'
+       19    
+       20    module CI
+       21      module Queue
+
+⏺ Now let's update the shuffle method to use strategies:
+
+⏺ Update(lib/ci/queue.rb)
+  ⎿  Updated lib/ci/queue.rb with 14 additions and 2 removals                   
+       31          requeueable.nil? || requeueable.call(test_result)
+       32        end
+       33    
+       34 -      def shuffle(tests, random)
+       34 +      def shuffle(tests, random, config: nil)
+       35          if shuffler
+       36            shuffler.call(tests, random)
+       37          else
+       38 -          tests.sort.shuffle(random: random)
+       38 +          strategy = get_strategy(config&.strategy)
+       39 +          strategy.order_tests(tests, random: random, config: config)
+       40          end
+       41        end
+       42    
+       43 +      private
+       44 +  
+       45 +      def get_strategy(strategy_name)
+       46 +        case strategy_name&.to_sym
+       47 +        when :timing_based
+       48 +          Strategy::TimingBased.new
+       49 +        else
+       50 +          Strategy::Random.new
+       51 +        end
+       52 +      end
+       53 +  
+       54        def from_uri(url, config)
+       55          uri = URI(url)
+       56          implementation = case uri.scheme
+
+⏺ We need to move the private keyword to the right place. Let's fix that:
+
+⏺ Update(lib/ci/queue.rb)
+  ⎿  Updated lib/ci/queue.rb with 11 removals      
+       40          end
+       41        end
+       42    
+       43 -      private
+       44 -  
+       45 -      def get_strategy(strategy_name)
+       46 -        case strategy_name&.to_sym
+       47 -        when :timing_based
+       48 -          Strategy::TimingBased.new
+       49 -        else
+       50 -          Strategy::Random.new
+       51 -        end
+       52 -      end
+       53 -  
+       43        def from_uri(url, config)
+       44          uri = URI(url)
+       45          implementation = case uri.scheme
+
+⏺ Let's add the get_strategy method after the module:
+
+⏺ Update(lib/ci/queue.rb)
+  ⎿  Updated lib/ci/queue.rb with 11 additions         
+       55          end
+       56          implementation.from_uri(uri, config)
+       57        end
+       58 +  
+       59 +      private
+       60 +  
+       61 +      def get_strategy(strategy_name)
+       62 +        case strategy_name&.to_sym
+       63 +        when :timing_based
+       64 +          Strategy::TimingBased.new
+       65 +        else
+       66 +          Strategy::Random.new
+       67 +        end
+       68 +      end
+       69      end
+       70    end
+
+⏺ Now we need to update the places where Queue.shuffle is called to pass the config. Let's find those:
+
+⏺ Search(pattern: "Queue\.shuffle", path: "lib", output_mode: "content")
+  ⎿  Found 1 line (ctrl+r to expand)
+
+⏺ Perfect! Let's update that call:
+
+⏺ Update(lib/ci/queue/redis/worker.rb)
+  ⎿  Updated lib/ci/queue/redis/worker.rb with 1 addition and 1 removal    
+       30    
+       31            def populate(tests, random: Random.new)
+       32              @index = tests.map { |t| [t.id, t] }.to_h
+       33 -            tests = Queue.shuffle(tests, random)
+       33 +            tests = Queue.shuffle(tests, random, config: config)
+       34              push(tests.map(&:id))
+       35              self
+       36            end
+
+⏺ Update Todos
+  ⎿  ☒ Create strategy base class and interface            
+     ☒ Implement Random strategy (extract current behavior)
+     ☒ Implement TimingBased strategy
+     ☒ Modify core Queue.shuffle to use strategies
+     ☒ Update Configuration class with new options
+     ☐ Enhance TestTimeReporter with JSON export
+     ☐ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Now let's enhance the TestTimeReporter with JSON export functionality:
+
+⏺ Update(lib/minitest/queue/test_time_reporter.rb)
+  ⎿  Updated lib/minitest/queue/test_time_reporter.rb with 2 additions and 1 removal               
+        6        class TestTimeReporter < Minitest::Reporters::BaseReporter
+        7          include ::CI::Queue::OutputHelpers
+        8    
+        9 -        def initialize(build:, limit: nil, percentile: nil, **options)
+        9 +        def initialize(build:, limit: nil, percentile: nil, export_file: nil, **options)
+       10            super(options)
+       11            @test_time_hash = build.fetch
+       12            @limit = limit
+       13            @percentile = percentile
+       14 +          @export_file = export_file
+       15            @success = true
+       16          end
+       17    
+
+⏺ Now let's update the report method to add JSON export:
+
+⏺ Update(lib/minitest/queue/test_time_reporter.rb)
+  ⎿  Updated lib/minitest/queue/test_time_reporter.rb with 2 additions
+       16          end
+       17    
+       18          def report
+       19 +          export_timing_data if @export_file
+       20 +  
+       21            return if limit.nil? || test_time_hash.empty?
+       22    
+       23            puts '+++ Test Time Report'
+
+⏺ Now let's add the export_timing_data method:
+
+⏺ Update(lib/minitest/queue/test_time_reporter.rb)
+  ⎿  Updated lib/minitest/queue/test_time_reporter.rb with 14 additions                              
+       50    
+       51          attr_reader :test_time_hash, :limit, :percentile
+       52    
+       53 +        def export_timing_data
+       54 +          return if test_time_hash.empty?
+       55 +  
+       56 +          # Convert test_time_hash to simple format: {"TestClass#method": avg_duration_ms}
+       57 +          timing_data = test_time_hash.transform_values do |durations|
+       58 +            durations.sum.to_f / durations.size  # Average duration
+       59 +          end
+       60 +  
+       61 +          File.write(@export_file, JSON.pretty_generate(timing_data))
+       62 +          puts "Exported timing data for #{timing_data.size} tests to #{@export_file}"
+       63 +        rescue => e
+       64 +          puts "Warning: Failed to export timing data to #{@export_file}: #{e.message}"
+       65 +        end
+       66 +  
+       67          def humanized_percentile
+       68            percentile_in_percentage = percentile * 100
+       69            "#{percentile_in_percentage.to_i}th"
+
+⏺ We need to add the JSON require:
+
+⏺ Update(lib/minitest/queue/test_time_reporter.rb)
+  ⎿  Updated lib/minitest/queue/test_time_reporter.rb with 1 addition
+       1    # frozen_string_literal: true
+       2    require 'minitest/reporters'
+       3 +  require 'json'
+       4    
+       5    module Minitest
+       6      module Queue
+
+⏺ Update Todos
+  ⎿  ☒ Create strategy base class and interface            
+     ☒ Implement Random strategy (extract current behavior)
+     ☒ Implement TimingBased strategy
+     ☒ Modify core Queue.shuffle to use strategies
+     ☒ Update Configuration class with new options
+     ☒ Enhance TestTimeReporter with JSON export
+     ☐ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Now let's add the CLI options to the Runner. Let's look at where to add them:
+
+⏺ Read(lib/minitest/queue/runner.rb)
+  ⎿  Read 25 lines (ctrl+r to expand)
+
+⏺ Let's add the new CLI options before the final separators:
+
+⏺ Update(lib/minitest/queue/runner.rb)
+  ⎿  Updated lib/minitest/queue/runner.rb with 32 additions                                       
+       564                self.test_globs = test_globs
+       565              end
+       566    
+       567 +            help = <<~EOS
+       568 +              Test ordering strategy: random, timing_based (default: random)
+       569 +            EOS
+       570              opts.separator ""
+       571 +            opts.on('--strategy STRATEGY', help) do |strategy|
+       572 +              queue_config.strategy = strategy.to_sym
+       573 +            end
+       574 +  
+       575 +            help = <<~EOS
+       576 +              Path to JSON timing file for timing_based strategy
+       577 +            EOS
+       578 +            opts.separator ""
+       579 +            opts.on('--timing-file PATH', help) do |path|
+       580 +              queue_config.timing_file = path
+       581 +            end
+       582 +  
+       583 +            help = <<~EOS
+       584 +              Fallback duration in ms for unknown tests (default: 100)
+       585 +            EOS
+       586 +            opts.separator ""
+       587 +            opts.on('--timing-fallback DURATION', Float, help) do |duration|
+       588 +              queue_config.timing_fallback_duration = duration
+       589 +            end
+       590 +  
+       591 +            help = <<~EOS
+       592 +              Export test timing data to JSON file after run (use with report command)
+       593 +            EOS
+       594 +            opts.separator ""
+       595 +            opts.on('--export-timing-file PATH', help) do |path|
+       596 +              queue_config.export_timing_file = path
+       597 +            end
+       598 +  
+       599 +            opts.separator ""
+       600              opts.separator "    retry: Replays a previous run in the same order."
+       601    
+       602              opts.separator ""
+
+⏺ Update Todos
+  ⎿  ☒ Create strategy base class and interface            
+     ☒ Implement Random strategy (extract current behavior)
+     ☒ Implement TimingBased strategy
+     ☒ Modify core Queue.shuffle to use strategies
+     ☒ Update Configuration class with new options
+     ☒ Enhance TestTimeReporter with JSON export
+     ☒ Add CLI options to Runner
+     ☐ Wire up components in Runner
+
+⏺ Now let's wire up the components. We need to update the report_command to use the export_file parameter
+   and update the report_grind_command as well:
+
+⏺ Read(lib/minitest/queue/runner.rb)
+  ⎿  Read 40 lines (ctrl+r to expand)
+
+⏺ I can see the report_command doesn't currently handle test timing reporting. Let's add it by
+  incorporating the timing export when track_test_duration is enabled:
+
+⏺ Update(lib/minitest/queue/runner.rb)
+  ⎿  Updated lib/minitest/queue/runner.rb with 16 additions and 1 removal                               
+       218              File.write(queue_config.export_flaky_tests_file, failures)
+       219            end
+       220    
+       221 +          # Handle timing data reporting and export
+       222 +          test_time_reporter_success = if queue_config.track_test_duration
+       223 +            test_time_record = CI::Queue::Redis::TestTimeRecord.new(queue_url, queue_config)
+       224 +            test_time_reporter = TestTimeReporter.new(
+       225 +              build: test_time_record,
+       226 +              limit: queue_config.max_test_duration,
+       227 +              percentile: queue_config.max_test_duration_percentile,
+       228 +              export_file: queue_config.export_timing_file
+       229 +            )
+       230 +            test_time_reporter.report
+       231 +            test_time_reporter.success?
+       232 +          else
+       233 +            true
+       234 +          end
+       235 +  
+       236            reporter.report
+       237 -          exit! reporter.success? ? 0 : 1
+       237 +          exit! reporter.success? && test_time_reporter_success ? 0 : 1
+       238          end
+       239    
+       240          def report_grind_command
+
+⏺ Let's also update the report_grind_command to include the export_file parameter:
+
+⏺ Read(lib/minitest/queue/runner.rb)
+  ⎿  Read 20 lines (ctrl+r to expand)
+
+⏺ Update(lib/minitest/queue/runner.rb)
+  ⎿  Updated lib/minitest/queue/runner.rb with 1 addition                       
+       256                build: test_time_record,
+       257                limit: queue_config.max_test_duration,
+       258                percentile: queue_config.max_test_duration_percentile,
+       259 +              export_file: queue_config.export_timing_file
+       260              )
+       261              test_time_reporter.report
+       262    
+
+⏺ Update Todos
+  ⎿  ☒ Create strategy base class and interface            
+     ☒ Implement Random strategy (extract current behavior)
+     ☒ Implement TimingBased strategy
+     ☒ Modify core Queue.shuffle to use strategies
+     ☒ Update Configuration class with new options
+     ☒ Enhance TestTimeReporter with JSON export
+     ☒ Add CLI options to Runner
+     ☒ Wire up components in Runner
+
+⏺ Perfect! Let's test our implementation to make sure everything works. First, let's run the linter to
+  check for any issues:
+
+⏺ Bash(cd /Users/ebarajas/figma/ci-queue/ruby && bundle exec rubocop lib/ci/queue/strategy/
+      lib/minitest/queue/test_time_reporter.rb --only=Lint/SyntaxError)
+  ⎿  Error: rbenv: rubocop: command not found
+
+     The `rubocop' command exists in these Ruby versions:
+       2.7.6
+       3.0.5
+       3.1.4
+       3.2.2
+       3.2.4
+       3.2.8
+       3.4.1
+     … +1 line (ctrl+r to see all)
+
+⏺ Let's try a different approach - check the Ruby syntax:
+
+⏺ Bash(cd /Users/ebarajas/figma/ci-queue/ruby && ruby -c lib/ci/queue/strategy/base.rb)
+  ⎿  No (tell Claude what to do differently)
+
+> Try the previous command again, we had to install dependencies first
+
+⏺ Bash(cd /Users/ebarajas/figma/ci-queue/ruby && ruby -c lib/ci/queue/strategy/base.rb)
+  ⎿  Syntax OK
+
+⏺ Bash(ruby -c lib/ci/queue/strategy/random.rb && ruby -c lib/ci/queue/strategy/timing_based.rb)
+  ⎿  Syntax OK
+     Syntax OK
+
+⏺ Bash(ruby -c lib/ci/queue.rb && ruby -c lib/ci/queue/configuration.rb)
+  ⎿  Syntax OK
+     Syntax OK
+
+⏺ Bash(ruby -c lib/minitest/queue/test_time_reporter.rb && ruby -c lib/minitest/queue/runner.rb)
+  ⎿  Syntax OK
+     Syntax OK
+
+⏺ Great! All files have correct syntax. Let's now create a simple test to verify our implementation
+  works:
+
+⏺ Write(test_strategy.rb)
+  ⎿  Wrote 56 lines to test_strategy.rb
+     #!/usr/bin/env ruby
+     require_relative 'lib/ci/queue'
+     # Create some mock test objects
+     class MockTest
+       attr_reader :id
+       def initialize(id)
+         @id = id
+     … +46 lines (ctrl+r to expand)
+
+⏺ Bash(ruby test_strategy.rb)
+  ⎿  Error: Ignoring prism-0.24.0 because its extensions are not built. Try: gem pristine prism --version 
+     0.24.0
+     <internal:/Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/site_ruby/3.2.0/rubygems/core_ext/kernel_req
+     uire.rb>:139:in `require': cannot load such file -- ci/queue/version (LoadError)
+     	from <internal:/Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/site_ruby/3.2.0/rubygems/core_ext/kerne
+     l_require.rb>:139:in `require'
+     	from /Users/ebarajas/figma/ci-queue/ruby/lib/ci/queue.rb:6:in `<top (required)>'
+     	from test_strategy.rb:3:in `require_relative'
+     	from test_strategy.rb:3:in `<main>'
+
+⏺ Let's create a simpler test without requiring the full gem structure:
+  ⎿  Interrupted by user
+
+> Try running the test with bundle exec
+
+⏺ Bash(bundle exec ruby test_strategy.rb)
+  ⎿  Error: Source locally installed gems is ignoring #<Bundler::StubSpecification name=prism 
+     version=0.24.0 platform=ruby> because it is missing extensions
+     /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/resolver.rb:
+     356:in `raise_not_found!': Could not find gem 'snappy' in locally installed gems. 
+     (Bundler::GemNotFound)
+     	from /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/resolve
+     r.rb:450:in `block in prepare_dependencies'
+     	from /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/resolve
+     r.rb:425:in `each'
+     	from /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/resolve
+     r.rb:425:in `filter_map'
+     	from /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/resolve
+     r.rb:425:in `prepare_dependencies'
+     	from /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/resolve
+     r.rb:63:in `setup_solver'
+     	from /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/resolve
+     r.rb:28:in `start'
+     	from /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/definit
+     ion.rb:744:in `start_resolution'
+     	from /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/bundler-2.7.2/lib/bundler/definit
+     ion.rb:344:in `resolve'
+     … +14 lines (ctrl+r to see all)
+
+⏺ Let's install the missing dependency first:
+
+⏺ Bash(bundle install)
+  ⎿  Error: Source rubygems repository https://rubygems.org/ or installed locally is ignoring 
+     #<Bundler::StubSpecification name=prism version=0.24.0 platform=ruby> because it is missing 
+     extensions
+     Gem::Ext::BuildError: ERROR: Failed to build gem native extension.
+
+     current directory:
+     /Users/ebarajas/.rbenv/versions/3.2.9/lib/ruby/gems/3.2.0/gems/snappy-0.4.0/ext
+     /Users/ebarajas/.rbenv/versions/3.2.9/bin/ruby extconf.rb
+     checking for -lsnappy... no
+     CMake Error at CMakeLists.txt:29 (cmake_minimum_required):
+       Compatibility with CMake < 3.5 has been removed from CMake.
+
+     … +132 lines (ctrl+r to see all)
+
+⏺ The dependency installation is failing. Let's create a simpler test that doesn't need the full gem
+  environment. Let's run the existing test suite instead to see if our changes work:
+
+⏺ Bash(find test -name "*test.rb" | head -3)
+  ⎿  No (tell Claude what to do differently)
+
+> Try running the test with bundle exec again, I think I fixed the missing dependency
+
+✻ Thinking…
+
+  The user says they fixed the missing dependency, so let's try running our test with bundle exec again.
+
+⏺ Bash(bundle exec ruby test_strategy.rb)
+  ⎿  Error: Source locally installed gems is ignoring #<Bundler::StubSpecification name=prism 
+     version=0.24.0 platform=ruby> because it is missing extensions
+     /Users/ebarajas/figma/ci-queue/ruby/lib/ci/queue/strategy/random.rb:9:in `sort': comparison of 
+     MockTest with MockTest failed (ArgumentError)
+     	from /Users/ebarajas/figma/ci-queue/ruby/lib/ci/queue/strategy/random.rb:9:in `order_tests'
+     	from /Users/ebarajas/figma/ci-queue/ruby/lib/ci/queue.rb:39:in `shuffle'
+     	from test_strategy.rb:44:in `<main>'
+
+     Original order: ["TestA#test_slow", "TestB#test_medium", "TestC#test_fast", "TestD#test_unknown", 
+     "TestE#test_missing"]
+
+✻ Thinking…
+
+  Great! The test is running now, but we have an issue with our MockTest class - it's not comparable 
+  because we need to implement the <=> method for sorting. Let me fix the test.
+
+⏺ Great! The test is running but we need to fix our MockTest class. Let me update it:
+
+⏺ Update(test_strategy.rb)
+  ⎿  Updated test_strategy.rb with 4 additions
+        9      def initialize(id)
+       10        @id = id
+       11      end
+       12 +    
+       13 +    def <=>(other)
+       14 +      id <=> other.id
+       15 +    end
+       16    end
+       17    
+       18    # Create test configuration
+
+✻ Thinking…
+
+  Now let me fix the timing data in the test - the JSON should not contain nil values. Let me update that
+   too.
+
+⏺ Update(test_strategy.rb)
+  ⎿  Updated test_strategy.rb with 1 addition and 1 removal     
+       27      "TestA#test_slow" => 500.0,
+       28      "TestB#test_medium" => 200.0,
+       29      "TestC#test_fast" => 50.0,
+       30 -    "TestD#test_unknown" => nil  # Will use fallback
+       30 +    "TestD#test_unknown" => 25.0
+       31    }
+       32    
+       33    File.write('test_timing.json', timing_data.to_json)
+
+✻ Thinking…
+
+  We need to add the require for JSON at the top of the test file.
+
+⏺ Update(test_strategy.rb)
+  ⎿  Updated test_strategy.rb with 1 addition
+       1    #!/usr/bin/env ruby
+       2    
+       3    require_relative 'lib/ci/queue'
+       4 +  require 'json'
+       5    
+       6    # Create some mock test objects
+       7    class MockTest
+
+✻ Thinking…
+
+  Now let's run the test again to see if it works.
+
+⏺ Bash(bundle exec ruby test_strategy.rb)
+  ⎿ Original order: ["TestA#test_slow", "TestB#test_medium", "TestC#test_fast", "TestD#test_unknown", "Te
+    stE#test_missing"]
+    Random strategy: ["TestB#test_medium", "TestE#test_missing", "TestC#test_fast", "TestA#test_slow", "T
+    … +10 lines (ctrl+r to expand)
+
+
+
+✻ Thinking…
+
+  We have an issue - there's a conflict with the File class. It seems that CI::Queue has a File class 
+  that's interfering with the built-in File class. Let me fix this by fully qualifying the File class in 
+  our timing strategy.
+
+⏺ Perfect! The test is almost working but we have a namespace issue with File. Let's fix that in our
+  TimingBased strategy:
+
+⏺ Update(lib/ci/queue/strategy/timing_based.rb)
+  ⎿  Updated lib/ci/queue/strategy/timing_based.rb with 2 additions and 2 removals           
+       19            private
+       20    
+       21            def load_timing_data(file_path)
+       22 -            return {} unless file_path && File.exist?(file_path)
+       22 +            return {} unless file_path && ::File.exist?(file_path)
+       23              
+       24 -            JSON.parse(File.read(file_path))
+       24 +            JSON.parse(::File.read(file_path))
+       25            rescue JSON::ParserError => e
+       26              warn "Warning: Could not parse timing file #{file_path}: #{e.message}"
+       27              {}
+
+✻ Thinking…
+
+  Now let's run the test again to see if it works correctly.
+
+⏺ Bash(bundle exec ruby test_strategy.rb)
+  ⎿ Original order: ["TestA#test_slow", "TestB#test_medium", "TestC#test_fast", "TestD#test_unknown", "Te
+    stE#test_missing"]
+    Random strategy: ["TestB#test_medium", "TestE#test_missing", "TestC#test_fast", "TestA#test_slow", "T
+    … +8 lines (ctrl+r to expand)
+
+
+
+✻ Thinking…
+
+  Excellent! The test is working correctly now. Let me analyze the results:
+
+  1. Random strategy: The tests are shuffled randomly as expected
+  2. Timing strategy: The tests are ordered by duration, longest first:
+    - TestA#test_slow (500ms) - first 
+    - TestB#test_medium (200ms) - second
+    - TestC#test_fast (50ms) - third
+    - TestE#test_missing (50ms fallback, as it's not in timing file) - fourth
+    - TestD#test_unknown (25ms) - last
+
+  This is exactly what we wanted! The timing-based strategy is correctly ordering tests with the longest 
+  ones first, and using fallback values for tests not found in the timing file.
+
+  Let me clean up the test file and then provide a summary.
+
+⏺ Excellent! The test is working perfectly! Let me clean up and show you what we've accomplished:
+
+⏺ Bash(rm test_strategy.rb test_timing.json)
+  ⎿  Error: rm: test_timing.json: No such file or directory
+
+✻ Thinking…
+
+  The JSON file was already deleted by our test. Let me just clean up the test file and provide a 
+  summary.
+
+⏺ Bash(rm test_strategy.rb)
+  ⎿  Error: rm: test_strategy.rb: No such file or directory
+
+✻ Thinking…
+
+  It seems the file might have already been cleaned up. Let me summarize what we've accomplished.
+
+⏺ Perfect! Our implementation is working correctly! Here's a summary of what we've successfully
+  implemented:
+
+  ✅ Implementation Complete: Test Ordering Strategy System + JSON Timing Export
+
+  What We Built:
+
+  1. Strategy Pattern for Test Ordering ✅
+    - CI::Queue::Strategy::Base - Interface for all strategies
+    - CI::Queue::Strategy::Random - Current behavior preserved
+    - CI::Queue::Strategy::TimingBased - New timing-based ordering
+  2. Enhanced JSON Timing Export ✅
+    - Extended TestTimeReporter with export_file parameter
+    - Exports simple JSON format: {"TestClass#method": avg_duration_ms}
+    - Only exports successful test timings (as planned)
+  3. Configuration & CLI Integration ✅
+    - New config options: strategy, timing_file, timing_fallback_duration, export_timing_file
+    - New CLI flags: --strategy, --timing-file, --timing-fallback, --export-timing-file
+    - Integrated into both report and report_grind commands
+  4. Core Integration ✅
+    - Modified CI::Queue.shuffle to use strategy pattern
+    - Preserved backward compatibility with existing shuffler callback
+    - Updated Redis::Worker to pass config to shuffle method
+
+  Test Results Confirmed:
+
+  - Random Strategy: ["TestB#test_medium", "TestE#test_missing", "TestC#test_fast", "TestA#test_slow", 
+  "TestD#test_unknown"] (shuffled)
+  - Timing Strategy: ["TestA#test_slow", "TestB#test_medium", "TestC#test_fast", "TestE#test_missing", 
+  "TestD#test_unknown"] (longest first!)
+
+  Usage Examples:
+
+  # Bootstrap run (collect timing data)
+  minitest-queue --track-test-duration run
+  minitest-queue report --export-timing-file timing.json
+
+  # Optimized runs (longest tests first + continuous timing updates)  
+  minitest-queue --track-test-duration --strategy timing_based --timing-file timing.json run
+  minitest-queue report --export-timing-file timing.json
+
+  The system now properly orders tests by duration (longest first) to solve your load balancing issue,
+  while continuously updating timing data and maintaining backward compatibility. Workers won't be stuck
+  waiting for long-running tests at the end! 🎯
+
+> This looks great. I'd like to start planning an additional strategy. I want to be able to binpack tests
+   onto workers by suite, and split that suite if the estimated duration is over a certain limit. So for 
+  example if TestA has four tests, and we estimate it will take 4 minutes while the limit is 2 minutes, 
+  I'd like to split it up so that separate workers take a chunk of tests.
+  It's important that a worker is able to work on multiple tests from a suite in order with this 
+  strategy. We want to leverage reusable test fixtures through database transactions, and tests must be 
+  grouped together for that to work.
+  Think very hard about this. I think it will require a significant change to how the workers and the 
+  queueing system works. Come up with a plan to implement this.
+  ⎿  ⧉ Selected 1 lines from lib/minitest/queue/runner.rb in Visual Studio Code
+
+✻ Thinking…
+
+  This is a very interesting and complex request. Let me think through this carefully.
+
+  The user wants to implement a "bin packing" strategy that:
+  1. Groups tests by suite (test class)
+  2. Estimates the total duration for each suite
+  3. If a suite's estimated duration exceeds a limit (e.g., 2 minutes), splits it into chunks
+  4. Ensures workers can work on multiple tests from the same suite in order
+  5. This is to leverage reusable test fixtures through database transactions
+
+  This is indeed a significant architectural change because:
+
+  Current system:
+  - Each test is treated as an individual unit
+  - Workers pull individual tests from the queue
+  - No concept of "suites" or "chunks" of tests that must be run together
+  - The SingleExample class represents individual test methods
+
+  New requirements:
+  - Need concept of "test suites" (groups of tests from same class)
+  - Need concept of "chunks" (subsets of a suite that fit within time limit)
+  - Workers need to be able to reserve and work on entire chunks
+  - Tests within a chunk must be run in order by the same worker
+
+  Let me analyze the current architecture:
+
+  1. Test Discovery: Minitest.loaded_tests returns SingleExample objects
+  2. Queue Population: populate_queue calls Minitest.queue.populate(Minitest.loaded_tests, random: 
+  ordering_seed, &:id)
+  3. Worker Polling: poll method in workers calls queue.poll do |example| to get individual tests
+  4. Test Execution: Each SingleExample is executed individually
+
+  For the new strategy, I need:
+
+  1. Suite Grouping: Group SingleExample objects by test class
+  2. Duration Estimation: Calculate estimated duration per suite using timing data
+  3. Chunk Creation: Split large suites into smaller chunks that fit time limits
+  4. Queue Structure: Instead of individual test IDs, queue "chunk IDs" that represent groups of tests
+
+  5. Worker Changes: Workers will now handle entire test chunks
+  6. Chunk Resolution: Mapping chunk IDs to specific tests for execution
+
+  I'll design a data structure to manage these test chunks efficiently. The TestChunk class will 
+  encapsulate key information about grouped tests, allowing for precise tracking and execution of test 
+  suites in manageable segments.
+
+  The proposed strategy involves intelligent test grouping and chunk management. I'll create a system 
+  that dynamically splits test suites based on estimated duration, ensuring balanced workload 
+  distribution. Workers will now operate on chunk-level reservations, executing multiple related tests in
+   a single atomic operation.
+
+  Key modifications will focus on queue and worker interactions. The polling mechanism will shift from 
+  individual test selection to chunk-based reservation. This approach maintains the core architecture 
+  while introducing more sophisticated test orchestration and parallel execution capabilities.
+
+  The alternative approach suggests maintaining most existing infrastructure, with strategic adjustments 
+  to test ordering and grouping mechanisms. This incremental evolution allows for more granular control 
+  over test suite execution without complete system redesign.
+
+  The primary challenge involves managing complex queuing logic within Redis's simple list structure, 
+  particularly around worker coordination and preventing race conditions during test selection.
+
+  I'll design a suite-based binning strategy that groups tests efficiently. By estimating suite durations
+   and creating intelligent chunks, we can optimize test distribution. The approach involves carefully 
+  packaging tests from the same suite into manageable units, ensuring balanced workload allocation while 
+  maintaining test group integrity.
+
+  The implementation focuses on creating chunks that respect suite boundaries, using timing data to 
+  estimate total test duration. We'll create single chunks for suites that fit within a maximum time 
+  threshold, allowing workers to process related tests together.
+
+  Key considerations include precise duration estimation, intelligent suite grouping, and maintaining 
+  predictable test execution patterns across distributed workers.
+
+  For more complex suites exceeding the time limit, we'll implement a sophisticated splitting mechanism 
+  that preserves test relationships while enabling parallel processing.
+
+  Two potential architectural approaches emerge: fundamentally restructuring the strategy interface or 
+  layering a chunking mechanism atop the existing system. The first option provides cleaner abstraction 
+  but requires more extensive modifications, while the second maintains compatibility at the cost of 
+  increased complexity.
+
+  Examining the current queue population logic reveals nuanced interactions between test shuffling, 
+  indexing, and worker processing. The implementation demands careful consideration of how test chunks 
+  integrate with existing mechanisms like random ordering and worker execution strategies.
+
+  I'm leaning towards a hybrid approach that minimally disrupts the current architecture while 
+  introducing flexible suite-aware chunking capabilities. This would allow maintaining the current 
+  interface while introducing more intelligent test distribution logic.
+
+  The proposed chunking strategy involves creating lightweight wrapper objects that preserve existing 
+  test metadata and execution semantics. By mapping chunk identifiers and maintaining a flexible lookup 
+  mechanism, we can enhance test distribution without wholesale system redesign.
+
+  Key implementation considerations include preserving random seed behaviors, maintaining test object 
+  references, and ensuring minimal performance overhead during chunk generation and resolution.
+
+  The alternative approach focuses on strategic test ordering rather than complex architectural 
+  modifications. By intelligently sequencing tests from the same suite, we can achieve locality goals 
+  with minimal system disruption.
+
+  Potential optimizations include:
+  1. Suite-aware shuffling algorithm
+  2. Lightweight test grouping mechanism
+  3. Minimal changes to existing queue and worker interfaces
+
+  The goal is achieving suite cohesion through intelligent test ordering, avoiding heavyweight chunking 
+  infrastructure while meeting core distribution requirements.
+
+  The proposed chunk-based design offers a more comprehensive solution. Key advantages include explicit 
+  test grouping, predictable execution patterns, and enhanced control over test distribution across 
+  workers.
+
+  Implementation priorities center on creating flexible test chunking mechanisms that support:
+  1. Dynamic suite-based test aggregation
+  2. Efficient worker chunk reservation
+  3. Sequential test execution within chunks
+
+  The strategy balances system complexity with improved test distribution efficiency, providing a robust 
+  framework for managing large test suites.
+
+  I'll focus on developing a unified execution interface that supports both individual tests and test 
+  chunks, enabling seamless integration with existing infrastructure while introducing more granular 
+  control over test scheduling and reporting.
+
+  The proposed Executable module represents a critical abstraction, allowing polymorphic treatment of 
+  single tests and test collections through consistent method signatures like run() and id().
+
+  By implementing this interface for TestChunk, we create a flexible system where worker polling 
+  mechanisms remain unchanged, yet gain the ability to handle more complex test grouping strategies. The 
+  initial implementation prioritizes simplicity: chunks are treated as atomic units, with individual test
+   result tracking and potential chunk-level requeuing in case of failures.
+
+  Key design principles include maintaining granular test reporting, supporting potential future 
+  enhancements like more sophisticated failure handling and flaky test detection, while keeping the 
+  initial implementation straightforward and extensible.
+
+⏺ This is a fascinating and complex requirement! You're absolutely right that this will require
+  significant architectural changes. Let me analyze the current system and design a comprehensive plan.
+
+⏺ Update Todos
+  ⎿  ☐ Analyze current architecture and identify required changes
+     ☐ Design TestChunk concept and data structures
+     ☐ Design SuiteBinPacking strategy
+     ☐ Plan worker execution changes for chunk handling
+     ☐ Plan queue and reporting system modifications
+
+✻ Thinking…
+
+  Let me analyze the current architecture more carefully to understand what needs to change.
+
+  Current flow:
+  1. Minitest.loaded_tests returns array of SingleExample objects
+  2. populate_queue calls Minitest.queue.populate(Minitest.loaded_tests, random: ordering_seed, &:id)
+  3. In queue.populate(tests, ...), tests are shuffled via Queue.shuffle(tests, random, config: config)
+  4. Queue stores test IDs: push(tests.map(&:id))
+  5. Index maps test ID to test object: @index = tests.map { |t| [t.id, t] }.to_h
+  6. Worker polls and gets individual test IDs
+  7. Worker looks up test object: index.fetch(test_id)
+  8. Worker executes: example.run
+
+  For binpacking by suite with chunks, I need:
+
+  Key Changes Required:
+
+  1. New Abstraction Layer: Instead of individual SingleExample objects going directly to queue, I need a
+   "chunk" layer that can contain multiple tests
+  2. Worker Changes: Workers need to execute entire chunks (multiple tests) sequentially  
+  3. Queue Changes: Store chunk IDs instead of individual test IDs
+  4. Strategy Changes: Return chunks instead of individual tests
+  5. Reporting Changes: Handle results from chunk execution
+
+  Let me think about this step by step...
+
+  The user specifically wants:
+  - Tests grouped by suite (test class)
+  - Large suites split into time-limited chunks  
+  - Workers execute multiple tests from same suite in order
+  - Leverage test fixtures through database transactions
+
+  This means:
+  1. A "suite" = all tests from the same test class (e.g., UserTest)
+  2. If UserTest has 10 tests estimated at 4 minutes total, and limit is 2 minutes, split into 2 chunks
+  3. Worker gets chunk like UserTest:chunk_1 containing 5 tests, runs them all sequentially
+
+  4. Database transactions can now span multiple related tests within the same chunk, ensuring consistent
+   setup and teardown across closely related tests.
+
+  The architectural challenge becomes creating a flexible execution model that supports both individual 
+  test and chunked test scenarios. I'll need a design that allows seamless switching between granular and
+   grouped test execution while maintaining the existing test infrastructure's core capabilities.
+
+  The proposed solution involves creating an abstraction that can represent both single tests and test 
+  chunks, with a consistent interface for execution and identification. This approach provides the 
+  flexibility to optimize test runs while preserving the existing test framework's fundamental behaviors.
+
+  The implementation introduces a unified executable interface that enables dynamic grouping of tests, 
+  allowing for more intelligent and efficient test scheduling and execution strategies.
+
+  Reporting requires granular tracking of individual test outcomes within a chunk. The current system 
+  expects detailed per-test result information, which means the chunk's run method must meticulously 
+  capture and aggregate results from each test.
+
+  Failure handling demands a balanced approach. I'll design the chunk execution to continue running all 
+  tests even if some fail, ensuring comprehensive result reporting. This allows capturing the full test 
+  suite's behavior without prematurely halting execution.
+
+  Requeuing strategy will treat chunks as atomic units. If a chunk encounters failures, the entire chunk 
+  will be requeued, maintaining the original grouping and preserving the scheduling logic's intent.
+
+  Flaky test detection becomes more nuanced at the chunk level. The implementation will track individual 
+  test flakiness while also providing a mechanism to mark entire chunks as potentially unstable based on 
+  their constituent tests' historical performance.
+
+⏺ Read(lib/minitest/queue.rb)
+  ⎿  Read 50 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Now I need to look at how workers handle test execution to understand what needs to change.
+
+⏺ Read(lib/minitest/queue.rb)
+  ⎿  Read 35 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Now let me look at the queue poll method to understand how tests are retrieved from the queue:
+
+⏺ Read(lib/ci/queue/redis/worker.rb)
+  ⎿  Read 30 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Perfect! Now I understand the current architecture well:
+
+  1. Test Discovery: Minitest.loaded_tests creates SingleExample objects
+  2. Queue Population: 
+    - populate(tests, ...) creates index: @index = tests.map { |t| [t.id, t] }.to_h
+    - Shuffles tests via strategy: tests = Queue.shuffle(tests, random, config: config)
+    - Stores IDs in queue: push(tests.map(&:id))
+  3. Worker Execution:
+    - poll method calls reserve to get a test ID
+    - Looks up test object: yield index.fetch(test)
+    - run_from_queue executes: result = example.run
+    - Handles reporting, failures, requeuing per individual test
+
+  For bin packing by suite, I need to introduce the concept of "chunks" that represent groups of tests 
+  that should run together.
+
+  Now I have enough info to create a comprehensive plan.
+
+⏺ Update Todos
+  ⎿  ☒ Analyze current architecture and identify required changes
+     ☒ Design TestChunk concept and data structures
+     ☒ Design SuiteBinPacking strategy
+     ☒ Plan worker execution changes for chunk handling
+     ☒ Plan queue and reporting system modifications
+
+✻ Thinking…
+
+  Now I have a complete understanding of the current architecture and can present a comprehensive plan.
+
+  Let me structure the plan to present it clearly to the user.
+
+  Key insights from the analysis:
+  1. Current system treats each test as individual unit
+  2. Workers poll for individual test IDs and execute one at a time  
+  3. Queue stores test IDs, index maps ID -> test object
+  4. Strategy determines order of tests
+  5. Reporting happens per individual test
+
+  For bin packing by suite, I need to:
+  1. Group tests by suite (class)
+  2. Split large suites into time-limited chunks
+  3. Workers execute entire chunks sequentially
+  4. Maintain all existing functionality (reporting, requeuing, flaky tests, etc.)
+
+  This is definitely a significant architectural change, but I can design it to be backward compatible.
+  ⎿  User rejected Claude's plan:
+     ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+     │ Implementation Plan: Suite Bin Packing Strategy                                                  │
+     │                                                                                                  │
+     │ Overview                                                                                         │
+     │                                                                                                  │
+     │ This is a significant architectural enhancement that introduces "test chunks" - groups of tests  │
+     │ from the same suite that execute together on a single worker. This enables test fixture reuse    │
+     │ through database transactions while maintaining load balancing.                                  │
+     │                                                                                                  │
+     │ Key Architectural Changes                                                                        │
+     │                                                                                                  │
+     │ 1. New Abstraction: TestChunk                                                                    │
+     │ class CI::Queue::TestChunk                                                                       │
+     │   attr_reader :id, :suite_name, :tests, :estimated_duration                                      │
+     │                                                                                                  │
+     │   def initialize(suite_name, tests, estimated_duration)                                          │
+     │     @id = "#{suite_name}:chunk_#{SecureRandom.hex(4)}"                                           │
+     │     @suite_name = suite_name                                                                     │
+     │     @tests = tests  # Array of SingleExample objects                                             │
+     │     @estimated_duration = estimated_duration                                                     │
+     │   end                                                                                            │
+     │                                                                                                  │
+     │   # Implements same interface as SingleExample                                                   │
+     │   def run; def flaky?; def <=>(other)                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ 2. New Strategy: SuiteBinPacking                                                                 │
+     │ - Groups tests by class name (suite)                                                             │
+     │ - Calculates estimated duration per suite using timing data                                      │
+     │ - Splits large suites into chunks that fit within time limit                                     │
+     │ - Returns mix of SingleExample and TestChunk objects                                             │
+     │ - Sorts by estimated duration (longest first)                                                    │
+     │                                                                                                  │
+     │ 3. Enhanced Worker Execution                                                                     │
+     │ - run_from_queue enhanced to handle both single tests and chunks                                 │
+     │ - When executing a chunk: runs all tests sequentially, reports each individual result            │
+     │ - Maintains all existing functionality: flaky test detection, requeuing, failure tracking        │
+     │ - Database transactions can span the entire chunk execution                                      │
+     │                                                                                                  │
+     │ 4. Backward Compatibility                                                                        │
+     │ - Existing strategies continue to work unchanged (return SingleExample objects)                  │
+     │ - New strategy returns chunks, but system handles both transparently                             │
+     │ - All existing configuration and CLI options preserved                                           │
+     │                                                                                                  │
+     │ Implementation Steps                                                                             │
+     │                                                                                                  │
+     │ Phase 1: Core Infrastructure                                                                     │
+     │ 1. Create TestChunk class with SingleExample-compatible interface                                │
+     │ 2. Create unified Executable module for common interface                                         │
+     │ 3. Update Queue.shuffle to handle mixed arrays of singles and chunks                             │
+     │                                                                                                  │
+     │ Phase 2: Strategy Implementation                                                                 │
+     │ 1. Implement SuiteBinPacking strategy with suite grouping logic                                  │
+     │ 2. Add chunk splitting algorithm based on time estimates                                         │
+     │ 3. Add configuration options: suite_max_duration, chunk_overlap_buffer                           │
+     │                                                                                                  │
+     │ Phase 3: Worker Enhancement                                                                      │
+     │ 1. Update run_from_queue to detect and handle chunk execution                                    │
+     │ 2. Implement sequential test execution within chunks                                             │
+     │ 3. Maintain individual test reporting and error handling                                         │
+     │ 4. Handle chunk-level vs test-level requeuing                                                    │
+     │                                                                                                  │
+     │ Phase 4: Integration & Testing                                                                   │
+     │ 1. Add CLI options: --suite-max-duration, --chunk-buffer                                         │
+     │ 2. Update documentation and help text                                                            │
+     │ 3. Comprehensive testing of chunk execution, failure scenarios                                   │
+     │ 4. Performance testing for large suites                                                          │
+     │                                                                                                  │
+     │ Configuration Options                                                                            │
+     │                                                                                                  │
+     │ - --strategy suite_bin_packing - Enable the new strategy                                         │
+     │ - --suite-max-duration DURATION - Max duration per chunk in milliseconds (default: 120000 =      │
+     │ 2min)                                                                                            │
+     │ - --chunk-buffer PERCENT - Buffer percentage for chunk splitting (default: 10%)                  │
+     │ - --timing-file PATH - Required for duration estimation                                          │
+     │ - --timing-fallback DURATION - Fallback for unknown tests                                        │
+     │                                                                                                  │
+     │ Usage Example                                                                                    │
+     │                                                                                                  │
+     │ # Bootstrap: collect timing data                                                                 │
+     │ minitest-queue --track-test-duration run                                                         │
+     │ minitest-queue report --export-timing-file timing.json                                           │
+     │                                                                                                  │
+     │ # Production: bin pack by suite                                                                  │
+     │ minitest-queue --track-test-duration \                                                           │
+     │   --strategy suite_bin_packing \                                                                 │
+     │   --timing-file timing.json \                                                                    │
+     │   --suite-max-duration 120000 \                                                                  │
+     │   run                                                                                            │
+     │                                                                                                  │
+     │ Benefits                                                                                         │
+     │                                                                                                  │
+     │ - ✅ Tests from same suite run together (database transaction reuse)                              │
+     │ - ✅ Large suites automatically split for load balancing                                          │
+     │ - ✅ Workers won't be idle waiting for long-running suites                                        │
+     │ - ✅ Maintains all existing functionality and backward compatibility                              │
+     │ - ✅ Optimal resource utilization across workers                                                  │
+     │                                                                                                  │
+     │ Risk Mitigation                                                                                  │
+     │                                                                                                  │
+     │ - Phased implementation reduces integration risk                                                 │
+     │ - Comprehensive testing of chunk vs individual test execution                                    │
+     │ - Fallback to individual test execution if chunk fails                                           │
+     │ - Extensive logging for debugging chunk behavior                                                 │
+     ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+> Think some more on how the data on which tests are in a chunk will be stored in the redis queue and 
+  update your plan accordingly
+
+✻ Thinking…
+
+  The user wants me to think more about how the data on which tests are in a chunk will be stored in the 
+  Redis queue and update the plan accordingly. Let me think through this carefully.
+
+  Currently, the system stores individual test IDs in Redis queues. The worker polls for a single test 
+  ID, fetches it from the index, and runs it.
+
+  With chunks, we have a few options:
+
+  1. Store chunk metadata in Redis separately: 
+    - Queue contains chunk IDs like "TestSuite:chunk_abc123"
+    - Separate Redis hash/key stores the mapping from chunk ID to list of test IDs
+    - Worker retrieves chunk ID, then fetches the test list from Redis
+    - Problem: Additional Redis calls, more complex
+  2. Serialize chunk data into the queue item:
+    - Queue contains JSON-encoded chunk data: 
+  {"type":"chunk","id":"TestSuite:chunk_abc123","tests":["TestA#test1","TestA#test2"]}
+    - Worker deserializes and processes
+    - Problem: Larger queue items, serialization overhead
+  3. Hybrid approach - chunk metadata in worker index:
+    - Queue contains chunk IDs
+    - Worker's @index contains both individual tests and chunk metadata
+    - Master populates both individual tests and chunks in index during populate()
+    - Worker retrieves from index like normal
+    - This seems cleanest!
+
+  Let me think about the current flow:
+
+  1. populate(tests) is called with array of SingleExample objects
+  2. @index = tests.map { |t| [t.id, t] }.to_h creates id -> test mapping
+  3. Queue.shuffle(tests, random, config: config) reorders tests
+  4. push(tests.map(&:id)) puts test IDs into Redis queue
+  5. Worker calls reserve to get a test ID from queue
+  6. Worker calls index.fetch(test_id) to get the actual test object
+
+  7. Worker yields the test object to run
+
+  I see a streamlined approach for handling chunks that builds on the existing infrastructure. The 
+  strategy will dynamically create a mix of individual tests and test chunks, storing them in a unified 
+  index. This allows the worker to retrieve and execute either type seamlessly, maintaining the current 
+  workflow while introducing chunk-based testing flexibility.
+
+  The key innovation is extending the index to handle both single tests and chunks, with the queue 
+  remaining a simple list of IDs. This approach minimizes complexity and leverages the existing system's 
+  architecture.
+
+  Critically, the chunk creation process ensures consistency across workers. Since all workers use the 
+  same test list and configuration, they'll generate identical chunk structures during population. This 
+  means each worker independently creates a matching index, eliminating synchronization concerns.
+
+  The solution elegantly preserves the current Redis and worker memory model, with chunk data residing in
+   worker memory and the queue remaining unchanged. This design maintains system simplicity while 
+  introducing more sophisticated test execution strategies.
+
+⏺ You're absolutely right - the Redis storage strategy is crucial and I need to think this through more
+  carefully. Let me analyze the current Redis queue architecture and design the chunk storage properly.
+
+⏺ Read(lib/ci/queue/redis/worker.rb)
+  ⎿  Read 15 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  So looking at the current architecture:
+
+  1. populate(tests, random: Random.new) gets called with array of SingleExample objects
+  2. @index = tests.map { |t| [t.id, t] }.to_h creates a hash from test id to test object
+  3. tests = Queue.shuffle(tests, random, config: config) reorders the tests 
+  4. push(tests.map(&:id)) pushes just the test IDs to Redis
+  5. Later, when worker calls reserve, it gets a test ID from Redis
+  6. Worker calls index.fetch(test_id) to get the actual test object from memory
+  7. The test object is yielded to the execution block
+
+  So the key insight is:
+  - Redis queue only stores IDs (strings)
+  - Worker memory (@index) stores the actual objects (test instances)
+  - All workers create the same @index because they all get the same test list and run the same strategy
+
+  For chunks, the approach would be:
+  1. Strategy returns mix of SingleExample and TestChunk objects
+  2. All objects (both singles and chunks) get stored in @index by their ID
+  3. Redis queue gets the IDs of both singles and chunks
+  4. Worker retrieves ID, fetches object from @index, and handles appropriately
+
+  This is clean because:
+  - No changes to Redis structure needed
+  - All chunk data stays in worker memory  
+  - Consistent with existing architecture
+  - All workers create identical chunks (deterministic)
+
+  The only consideration is determinism - we need to ensure all workers create identical chunks. This 
+  should work because:
+  - All workers get same test list from loaded_tests
+  - All workers use same config (timing file, max duration, etc.)
+  - All workers use same random seed for shuffling
+  - Strategy algorithm is deterministic given same inputs
+
+  So the chunk IDs and composition will be identical across workers.
+
+  Let me also check the push method to see how it works.
+
+⏺ Read(lib/ci/queue/redis/worker.rb)
+  ⎿  Read 20 lines (ctrl+r to expand)
+
+✻ Thinking…
+
+  Perfect! So push(tests) just does transaction.lpush(key('queue'), tests) where tests is an array of IDs
+   (strings).
+
+  And I can see that only the master worker (the first one to acquire the lock with 
+  redis.setnx(key('master-status'), 'setup')) actually pushes to Redis. The other workers just register 
+  themselves.
+
+  This means:
+  1. First worker becomes master and populates Redis queue with IDs
+  2. All workers (including master) create their own @index with the same objects
+  3. All workers can fetch from their local @index using IDs from Redis
+
+  For chunks, this means:
+  1. All workers run the same populate() call with same test list
+  2. All workers use same strategy with same config to create chunks  
+  3. Master worker pushes mix of test IDs and chunk IDs to Redis queue
+  4. All workers have same @index mapping from both test IDs and chunk IDs to objects
+  5. Workers retrieve IDs from Redis and fetch objects from their local @index
+
+  This is actually elegant - no changes to Redis structure needed at all!
+
+  The key insight is that chunk creation must be deterministic - all workers must create identical 
+  chunks. This should work because:
+
+  1. Same input data: All workers call Minitest.loaded_tests which returns same test list
+  2. Same configuration: All workers use same queue_config (timing file, max duration, etc.)
+  3. Same randomization: All workers use same seed via ordering_seed method  
+  4. Deterministic algorithm: Bin packing algorithm with same inputs produces same chunks
+
+  The only tricky part is ensuring chunk IDs are deterministic. Instead of using SecureRandom.hex(4), I 
+  should use something deterministic like a hash of the test IDs in the chunk.
+
+  Let me update the plan with this Redis storage strategy.
+  ⎿  User rejected Claude's plan:
+     ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+     │ Implementation Plan: Suite Bin Packing Strategy with Redis Architecture                          │
+     │                                                                                                  │
+     │ Redis Storage Strategy                                                                           │
+     │                                                                                                  │
+     │ Key Insight: The current architecture stores only IDs in Redis and objects in worker memory.     │
+     │ This continues to work perfectly for chunks with no Redis changes needed.                        │
+     │                                                                                                  │
+     │ Current Flow:                                                                                    │
+     │ 1. All workers call populate(tests) with same test list                                          │
+     │ 2. Master worker pushes test IDs to Redis queue: ['TestA#test1', 'TestB#test2', ...]             │
+     │ 3. All workers create identical @index = {id => test_object} in memory                           │
+     │ 4. Workers retrieve ID from Redis, fetch object from local @index                                │
+     │                                                                                                  │
+     │ With Chunks:                                                                                     │
+     │ 1. All workers run same strategy to create identical chunks (deterministic)                      │
+     │ 2. Master worker pushes mix of IDs to Redis: ['TestA#test1', 'chunk_abc123', 'TestB#test2', ...] │
+     │ 3. All workers create identical @index = {id => object} containing both tests and chunks         │
+     │ 4. Workers retrieve ID from Redis, fetch object (test OR chunk) from @index                      │
+     │                                                                                                  │
+     │ Deterministic Chunk Creation                                                                     │
+     │                                                                                                  │
+     │ Critical Requirement: All workers must create identical chunks                                   │
+     │                                                                                                  │
+     │ Achieved Through:                                                                                │
+     │ - Same test list from Minitest.loaded_tests                                                      │
+     │ - Same configuration (timing file, max duration)                                                 │
+     │ - Same random seed via ordering_seed                                                             │
+     │ - Deterministic chunk IDs using hash of test list:                                               │
+     │ "#{suite_name}:chunk_#{Digest::MD5.hexdigest(test_ids.join(':'))[0,8]}"                          │
+     │                                                                                                  │
+     │ Core Implementation                                                                              │
+     │                                                                                                  │
+     │ 1. TestChunk Class                                                                               │
+     │ class CI::Queue::TestChunk                                                                       │
+     │   attr_reader :id, :suite_name, :tests, :estimated_duration                                      │
+     │                                                                                                  │
+     │   def initialize(suite_name, tests, estimated_duration = 0)                                      │
+     │     # Deterministic ID based on test content                                                     │
+     │     test_ids_hash = Digest::MD5.hexdigest(tests.map(&:id).sort.join(':'))[0,8]                   │
+     │     @id = "#{suite_name}:chunk_#{test_ids_hash}"                                                 │
+     │     @suite_name = suite_name                                                                     │
+     │     @tests = tests.freeze                                                                        │
+     │     @estimated_duration = estimated_duration                                                     │
+     │   end                                                                                            │
+     │                                                                                                  │
+     │   # SingleExample-compatible interface                                                           │
+     │   def run; def flaky?; def <=>(other)                                                            │
+     │   # Can be treated like a single test by existing code                                           │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ 2. SuiteBinPacking Strategy                                                                      │
+     │ class CI::Queue::Strategy::SuiteBinPacking < Base                                                │
+     │   def order_tests(tests, random: Random.new, config: nil)                                        │
+     │     # Group tests by suite (class name)                                                          │
+     │     suites = tests.group_by { |test| test.id.split('#').first }                                  │
+     │                                                                                                  │
+     │     chunks = []                                                                                  │
+     │     suites.each do |suite_name, suite_tests|                                                     │
+     │       chunks.concat(create_chunks_for_suite(suite_name, suite_tests, config))                    │
+     │     end                                                                                          │
+     │                                                                                                  │
+     │     # Sort by estimated duration (longest first)                                                 │
+     │     chunks.sort_by { |chunk| -chunk.estimated_duration }                                         │
+     │   end                                                                                            │
+     │                                                                                                  │
+     │   private                                                                                        │
+     │                                                                                                  │
+     │   def create_chunks_for_suite(suite_name, tests, config)                                         │
+     │     # Calculate total suite duration, split if > max_duration                                    │
+     │     # Return array of TestChunk objects                                                          │
+     │   end                                                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ 3. Enhanced Worker Execution                                                                     │
+     │ # In run_from_queue method                                                                       │
+     │ def run_from_queue(reporter, *)                                                                  │
+     │   queue.poll do |executable| # Could be SingleExample or TestChunk                               │
+     │     if executable.is_a?(TestChunk)                                                               │
+     │       run_chunk(executable, reporter)                                                            │
+     │     else                                                                                         │
+     │       run_single_test(executable, reporter) # Existing logic                                     │
+     │     end                                                                                          │
+     │   end                                                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ def run_chunk(chunk, reporter)                                                                   │
+     │   chunk.tests.each do |test|                                                                     │
+     │     # Run each test in chunk sequentially                                                        │
+     │     # Report each test individually                                                              │
+     │     # Maintain transaction context across chunk                                                  │
+     │   end                                                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ Redis Queue Structure (Unchanged!)                                                               │
+     │                                                                                                  │
+     │ Queue Contents: Mix of test IDs and chunk IDs                                                    │
+     │ Redis List: build:123:queue                                                                      │
+     │ ├── "TestA#test_fast"           # Individual test                                                │
+     │ ├── "TestSuite:chunk_abc12345"  # Chunk with 3 tests                                             │
+     │ ├── "TestB#test_medium"         # Individual test                                                │
+     │ └── "TestSuite:chunk_def67890"  # Chunk with 2 tests                                             │
+     │                                                                                                  │
+     │ Worker Memory: Index maps all IDs to objects                                                     │
+     │ @index = {                                                                                       │
+     │   "TestA#test_fast" => SingleExample.new(...),                                                   │
+     │   "TestSuite:chunk_abc12345" => TestChunk.new(..., [test1, test2, test3]),                       │
+     │   "TestB#test_medium" => SingleExample.new(...),                                                 │
+     │   "TestSuite:chunk_def67890" => TestChunk.new(..., [test4, test5])                               │
+     │ }                                                                                                │
+     │                                                                                                  │
+     │ Configuration & CLI                                                                              │
+     │                                                                                                  │
+     │ New Options:                                                                                     │
+     │ - --strategy suite_bin_packing - Enable chunk-based execution                                    │
+     │ - --suite-max-duration DURATION - Max chunk duration in ms (default: 120000)                     │
+     │ - --chunk-buffer PERCENT - Safety buffer for estimates (default: 10%)                            │
+     │                                                                                                  │
+     │ Required Existing Options:                                                                       │
+     │ - --timing-file PATH - Duration estimates for bin packing                                        │
+     │ - --timing-fallback DURATION - For tests without timing data                                     │
+     │                                                                                                  │
+     │ Implementation Phases                                                                            │
+     │                                                                                                  │
+     │ Phase 1: Core Infrastructure                                                                     │
+     │ 1. Create TestChunk class with deterministic IDs                                                 │
+     │ 2. Update populate() to handle mixed arrays in @index                                            │
+     │ 3. Enhance run_from_queue to detect and run chunks                                               │
+     │                                                                                                  │
+     │ Phase 2: Strategy Implementation                                                                 │
+     │ 1. Implement SuiteBinPacking strategy with grouping and splitting                                │
+     │ 2. Add configuration options for chunk limits                                                    │
+     │ 3. Comprehensive chunk creation testing                                                          │
+     │                                                                                                  │
+     │ Phase 3: Integration & Testing                                                                   │
+     │ 1. Add CLI options and help documentation                                                        │
+     │ 2. Test deterministic chunk creation across workers                                              │
+     │ 3. Test chunk execution, failure handling, requeuing                                             │
+     │ 4. Performance testing with large suites                                                         │
+     │                                                                                                  │
+     │ Key Benefits                                                                                     │
+     │                                                                                                  │
+     │ ✅ No Redis changes needed - leverages existing ID-based architecture✅ Deterministic chunk        │
+     │ creation - all workers create identical chunks✅ Suite transaction reuse - tests in chunk run     │
+     │ sequentially on same worker✅ Load balancing - large suites split automatically✅ Backward         │
+     │ compatible - existing strategies unchanged✅ Failure isolation - individual tests in chunk can    │
+     │ fail/requeue independently                                                                       │
+     ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+> Think about how the workers will know what tests are in a chunk if they only get an ID with an MD5 
+  hash. Is the expectation that all workers have to deterministically chunk tests the same as the master?
+
+✻ Thinking…
+
+  The user is pointing out a critical flaw in my plan. Let me think through this more carefully:
+
+  Current architecture:
+  1. All workers call populate(tests) with the SAME test list (from Minitest.loaded_tests)
+  2. Master worker shuffles/strategies the tests, then pushes test IDs to Redis
+  3. All workers create their own @index = {id => test_object} mapping
+
+  My chunk plan assumed:
+  - All workers would run the same strategy to create identical chunks
+  - Master pushes chunk IDs to Redis
+  - Workers would somehow have the same chunk objects in their @index
+
+  But the user is right - this has a fundamental problem:
+
+  Problem: If master creates chunks and puts chunk IDs in Redis (like "TestSuite:chunk_abc12345"), how do
+   the OTHER workers know what tests are in that chunk? They only get the chunk ID from Redis.
+
+  Current approach won't work because:
+  1. Master runs strategy, creates chunks, puts chunk IDs in Redis queue
+  2. Worker gets chunk ID from Redis: "TestSuite:chunk_abc12345"  
+  3. Worker tries to look up @index["TestSuite:chunk_abc12345"] but... 
+  4. Worker doesn't have that chunk in their index! They would need to run the exact same strategy to 
+  create the exact same chunk with the exact same ID.
+
+  So yes, the expectation would be that ALL workers have to deterministically chunk tests the same as the
+   master. But that's problematic because:
+
+  1. Timing dependency: What if the timing file is missing/corrupted on some workers?
+  2. Strategy complexity: The chunking strategy would need to be 100% deterministic across all workers
+  3. Performance: Every worker has to run the expensive chunking algorithm
+  4. Reliability: Any difference in worker state (file system, config) could break chunking
+
+  Better approaches:
+
+  Option 1: Store chunk metadata in Redis
+
+  I see a straightforward solution where the master creates chunks and stores detailed metadata directly 
+  in Redis. Workers can then retrieve precise information about each chunk without recreating the entire 
+  chunking process. This approach centralizes the chunk information and eliminates the need for workers 
+  to independently generate chunks.
+
+  Option 2: Expand chunk IDs
+  Another elegant approach involves embedding test details directly into chunk identifiers. By using a 
+  more descriptive ID format, workers can immediately understand the chunk's contents without additional 
+  lookups. This method reduces complexity and eliminates extra Redis interactions.
+
+  Option 3: Pre-serialize chunks
+  A comprehensive solution involves the master fully serializing chunk objects into Redis. Workers simply
+   deserialize these complete objects when retrieved. While this consumes more Redis storage, it provides
+   the most robust and straightforward mechanism for distributing test chunks across the worker pool.
+
+  Option 4: Queue-based chunking
+  An innovative strategy uses Redis queues with explicit chunk markers. By carefully structuring the 
+  queue with start and end indicators, workers can dynamically detect and group tests within each chunk. 
+  This approach offers flexible boundary detection without complex metadata management.
+
+  After evaluating the options, the first approach seems most aligned with the existing architecture - 
+  maintaining the core ID-based system while introducing targeted metadata storage.
+
+⏺ You're absolutely right - that's a critical flaw in my plan! If workers only get a chunk ID like
+  "TestSuite:chunk_abc12345" from Redis, they have no way to know what tests are actually in that chunk.
+
+  My original assumption that "all workers create identical chunks" is problematic because:
+
+  1. Reliability Risk: Any difference in worker environment (missing timing file, config differences)
+  breaks chunking
+  2. Performance: Every worker must run expensive chunking algorithm
+  3. Complexity: 100% deterministic chunking across all workers is fragile
+
+  Let me think through better approaches:
+  ⎿  User rejected Claude's plan:
+     ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+     │ Implementation Plan: Suite Bin Packing Strategy with Redis Chunk Metadata                        │
+     │                                                                                                  │
+     │ The Core Problem Solved                                                                          │
+     │                                                                                                  │
+     │ Workers need to know what tests are in a chunk when they only receive a chunk ID from Redis.     │
+     │ Instead of requiring all workers to deterministically recreate chunks, we'll store chunk         │
+     │ metadata in Redis.                                                                               │
+     │                                                                                                  │
+     │ Redis Architecture: Chunk Metadata Storage                                                       │
+     │                                                                                                  │
+     │ New Redis Keys:                                                                                  │
+     │ build:123:chunk:abc12345     -> JSON serialized test IDs                                         │
+     │ build:123:chunk:def67890     -> JSON serialized test IDs                                         │
+     │ build:123:chunks             -> Set of all chunk IDs (for cleanup)                               │
+     │                                                                                                  │
+     │ Queue Flow:                                                                                      │
+     │ 1. Master worker: Creates chunks, stores metadata, pushes chunk IDs to queue                     │
+     │ 2. All workers: Receive chunk ID, fetch metadata from Redis, execute tests                       │
+     │                                                                                                  │
+     │ Implementation Details                                                                           │
+     │                                                                                                  │
+     │ 1. Master Worker Chunk Creation & Storage                                                        │
+     │ def populate(tests, random: Random.new)                                                          │
+     │   @index = tests.map { |t| [t.id, t] }.to_h                                                      │
+     │                                                                                                  │
+     │   # Strategy returns mix of SingleExample and TestChunk objects                                  │
+     │   executables = Queue.shuffle(tests, random, config: config)                                     │
+     │                                                                                                  │
+     │   # Separate chunks from individual tests                                                        │
+     │   chunks = executables.select { |e| e.is_a?(TestChunk) }                                         │
+     │   individuals = executables.select { |e| e.is_a?(SingleExample) }                                │
+     │                                                                                                  │
+     │   # Store chunk metadata in Redis (master only)                                                  │
+     │   if master?                                                                                     │
+     │     store_chunk_metadata(chunks)                                                                 │
+     │   end                                                                                            │
+     │                                                                                                  │
+     │   # Push all IDs (chunks + individuals) to queue                                                 │
+     │   all_ids = executables.map(&:id)                                                                │
+     │   push(all_ids)                                                                                  │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ def store_chunk_metadata(chunks)                                                                 │
+     │   redis.multi do |transaction|                                                                   │
+     │     chunks.each do |chunk|                                                                       │
+     │       # Store test IDs for this chunk                                                            │
+     │       test_ids = chunk.tests.map(&:id)                                                           │
+     │       transaction.set(                                                                           │
+     │         key('chunk', chunk.id),                                                                  │
+     │         JSON.generate({                                                                          │
+     │           test_ids: test_ids,                                                                    │
+     │           suite_name: chunk.suite_name,                                                          │
+     │           estimated_duration: chunk.estimated_duration                                           │
+     │         })                                                                                       │
+     │       )                                                                                          │
+     │       transaction.sadd(key('chunks'), chunk.id)                                                  │
+     │       transaction.expire(key('chunk', chunk.id), config.redis_ttl)                               │
+     │     end                                                                                          │
+     │     transaction.expire(key('chunks'), config.redis_ttl)                                          │
+     │   end                                                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ 2. Worker Chunk Resolution & Execution                                                           │
+     │ def poll                                                                                         │
+     │   # ... existing poll logic ...                                                                  │
+     │   if test_or_chunk_id = reserve                                                                  │
+     │     executable = resolve_executable(test_or_chunk_id)                                            │
+     │     yield executable                                                                             │
+     │   end                                                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ def resolve_executable(id)                                                                       │
+     │   # Check if it's a chunk ID                                                                     │
+     │   if id.include?(':chunk_')                                                                      │
+     │     resolve_chunk(id)                                                                            │
+     │   else                                                                                           │
+     │     # Regular test - use existing index lookup                                                   │
+     │     index.fetch(id)                                                                              │
+     │   end                                                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ def resolve_chunk(chunk_id)                                                                      │
+     │   # Fetch chunk metadata from Redis                                                              │
+     │   chunk_data = redis.get(key('chunk', chunk_id))                                                 │
+     │   return nil unless chunk_data                                                                   │
+     │                                                                                                  │
+     │   metadata = JSON.parse(chunk_data)                                                              │
+     │   test_objects = metadata['test_ids'].map { |test_id| index.fetch(test_id) }                     │
+     │                                                                                                  │
+     │   # Create chunk object with resolved test objects                                               │
+     │   TestChunk.new(                                                                                 │
+     │     chunk_id,                                                                                    │
+     │     metadata['suite_name'],                                                                      │
+     │     test_objects,                                                                                │
+     │     metadata['estimated_duration']                                                               │
+     │   )                                                                                              │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ 3. Enhanced TestChunk Class                                                                      │
+     │ class CI::Queue::TestChunk                                                                       │
+     │   attr_reader :id, :suite_name, :tests, :estimated_duration                                      │
+     │                                                                                                  │
+     │   def initialize(id, suite_name, tests, estimated_duration = 0)                                  │
+     │     @id = id                                                                                     │
+     │     @suite_name = suite_name                                                                     │
+     │     @tests = tests.freeze                                                                        │
+     │     @estimated_duration = estimated_duration                                                     │
+     │   end                                                                                            │
+     │                                                                                                  │
+     │   def run                                                                                        │
+     │     # Sequential execution of all tests in chunk                                                 │
+     │     results = []                                                                                 │
+     │     tests.each do |test|                                                                         │
+     │       results << test.run                                                                        │
+     │     end                                                                                          │
+     │     results                                                                                      │
+     │   end                                                                                            │
+     │                                                                                                  │
+     │   def flaky?                                                                                     │
+     │     tests.any?(&:flaky?)                                                                         │
+     │   end                                                                                            │
+     │                                                                                                  │
+     │   def <=>(other)                                                                                 │
+     │     estimated_duration <=> other.estimated_duration                                              │
+     │   end                                                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ 4. Chunk Creation Strategy                                                                       │
+     │ class CI::Queue::Strategy::SuiteBinPacking < Base                                                │
+     │   def order_tests(tests, random: Random.new, config: nil)                                        │
+     │     timing_data = load_timing_data(config&.timing_file)                                          │
+     │     max_duration = config&.suite_max_duration || 120_000 # 2 minutes                             │
+     │                                                                                                  │
+     │     # Group tests by suite                                                                       │
+     │     suites = tests.group_by { |test| extract_suite_name(test.id) }                               │
+     │                                                                                                  │
+     │     executables = []                                                                             │
+     │     suites.each do |suite_name, suite_tests|                                                     │
+     │       suite_duration = calculate_suite_duration(suite_tests, timing_data, config)                │
+     │                                                                                                  │
+     │       if suite_duration <= max_duration                                                          │
+     │         # Suite fits in one chunk                                                                │
+     │         chunk_id = generate_chunk_id(suite_name, suite_tests)                                    │
+     │         executables << TestChunk.new(chunk_id, suite_name, suite_tests, suite_duration)          │
+     │       else                                                                                       │
+     │         # Split suite into multiple chunks                                                       │
+     │         chunks = split_suite_into_chunks(suite_name, suite_tests, max_duration, timing_data,     │
+     │ config)                                                                                          │
+     │         executables.concat(chunks)                                                               │
+     │       end                                                                                        │
+     │     end                                                                                          │
+     │                                                                                                  │
+     │     # Sort by estimated duration (longest first)                                                 │
+     │     executables.sort_by { |e| -estimate_duration(e) }                                            │
+     │   end                                                                                            │
+     │                                                                                                  │
+     │   private                                                                                        │
+     │                                                                                                  │
+     │   def generate_chunk_id(suite_name, tests)                                                       │
+     │     test_ids_hash = Digest::MD5.hexdigest(tests.map(&:id).sort.join(':'))[0,8]                   │
+     │     "#{suite_name}:chunk_#{test_ids_hash}"                                                       │
+     │   end                                                                                            │
+     │ end                                                                                              │
+     │                                                                                                  │
+     │ Configuration & Usage                                                                            │
+     │                                                                                                  │
+     │ New CLI Options:                                                                                 │
+     │ - --strategy suite_bin_packing - Enable chunk-based execution                                    │
+     │ - --suite-max-duration DURATION - Max chunk duration in ms (default: 120000)                     │
+     │ - --chunk-buffer PERCENT - Safety buffer percentage (default: 10%)                               │
+     │                                                                                                  │
+     │ Usage Example:                                                                                   │
+     │ # Collect timing data                                                                            │
+     │ minitest-queue --track-test-duration run                                                         │
+     │ minitest-queue report --export-timing-file timing.json                                           │
+     │                                                                                                  │
+     │ # Use bin packing strategy                                                                       │
+     │ minitest-queue --track-test-duration \                                                           │
+     │   --strategy suite_bin_packing \                                                                 │
+     │   --timing-file timing.json \                                                                    │
+     │   --suite-max-duration 120000 \                                                                  │
+     │   run                                                                                            │
+     │                                                                                                  │
+     │ Redis Storage Overhead                                                                           │
+     │                                                                                                  │
+     │ Estimated Storage:                                                                               │
+     │ - ~100 bytes per chunk metadata                                                                  │
+     │ - For 1000 tests in 50 chunks = ~5KB additional Redis storage                                    │
+     │ - TTL expires with test run (8 hours default)                                                    │
+     │                                                                                                  │
+     │ Key Advantages                                                                                   │
+     │                                                                                                  │
+     │ ✅ Simple worker logic - Workers just fetch chunk metadata from Redis✅ No deterministic           │
+     │ chunking required - Only master creates chunks✅ Reliable - No dependency on worker environment   │
+     │ consistency✅ Backward compatible - Individual tests work exactly as before✅ Suite transaction    │
+     │ reuse - Tests in chunk execute sequentially✅ Load balancing - Large suites automatically         │
+     │ split✅ Failure isolation - Individual tests in chunk can fail independently                      │
+     │                                                                                                  │
+     │ Implementation Phases                                                                            │
+     │                                                                                                  │
+     │ Phase 1: Core chunk metadata storage and retrievalPhase 2: SuiteBinPacking strategy              │
+     │ implementationPhase 3: Enhanced worker execution for chunksPhase 4: CLI integration and          │
+     │ comprehensive testing                                                                            │
+     ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+> This looks great. Give me a fully scoped plan to save and come back to
+                                                                                                         
+⏺ User approved Claude's plan:
+  ⎿ Complete Implementation Plan: Suite Bin Packing Strategy
+
+    Overview
+
+    Implement a new test ordering strategy that groups tests by suite (test class) and creates "chunks" 
+    that execute sequentially on a single worker. Large suites are automatically split to maintain load 
+    balancing while preserving the ability to reuse test fixtures through database transactions.
+
+    Phase 1: Core Infrastructure (Foundation)
+
+    1.1 Create TestChunk Class
+
+    File: lib/ci/queue/test_chunk.rb
+    - Implements same interface as SingleExample (run, flaky?, <=>, id)
+    - Stores suite name, array of test objects, estimated duration
+    - Sequential execution of all tests in chunk with individual result reporting
+    - Proper error handling and flaky test detection per individual test
+
+    1.2 Enhance Redis Worker for Chunk Metadata
+
+    File: lib/ci/queue/redis/worker.rb
+    - Master worker: Store chunk metadata in Redis during populate()
+      - New Redis keys: build:123:chunk:chunk_id (JSON metadata)
+      - Chunk metadata: {test_ids: [], suite_name: "", estimated_duration: 0}
+    - All workers: Resolve chunk IDs by fetching metadata from Redis
+      - New method: resolve_executable(id) - returns SingleExample or TestChunk
+      - New method: resolve_chunk(chunk_id) - fetches metadata, creates TestChunk object
+
+    1.3 Update Queue Processing
+
+    File: lib/minitest/queue.rb
+    - Enhance run_from_queue to handle both SingleExample and TestChunk objects
+    - New method: run_chunk(chunk, reporter) - sequential test execution
+    - Maintain all existing functionality: flaky detection, requeuing, failure tracking
+    - Each test in chunk reports individually to maintain granular results
+
+    Phase 2: Strategy Implementation
+
+    2.1 Create SuiteBinPacking Strategy
+
+    File: lib/ci/queue/strategy/suite_bin_packing.rb
+    - Groups tests by suite name (class name from test ID)
+    - Loads timing data to calculate suite durations
+    - Splits large suites into multiple chunks based on suite_max_duration
+    - Generates deterministic chunk IDs using hash of test IDs
+    - Returns sorted array (longest duration first) of mixed SingleExample/TestChunk objects
+
+    2.2 Chunk Creation Algorithm
+
+    - Suite grouping: Extract class name from TestClass#test_method format
+    - Duration calculation: Sum individual test timings from JSON file
+    - Smart splitting: Use bin packing algorithm to create optimal chunks
+      - First-fit decreasing for balanced chunk sizes
+      - Respect suite boundaries (never split individual tests)
+      - Apply buffer percentage for timing estimate safety
+
+    2.3 Configuration Extensions
+
+    File: lib/ci/queue/configuration.rb
+    - Add: suite_max_duration (default: 120000ms = 2min)
+    - Add: chunk_buffer_percent (default: 10%)
+    - Validation: Ensure timing_file exists when using suite_bin_packing
+
+    Phase 3: CLI Integration
+
+    3.1 Runner CLI Options
+
+    File: lib/minitest/queue/runner.rb
+    - --strategy suite_bin_packing - Enable chunk-based execution
+    - --suite-max-duration DURATION - Max chunk duration in milliseconds
+    - --chunk-buffer PERCENT - Safety buffer for duration estimates
+    - Update help documentation with new strategy explanation
+    - Add validation: require --timing-file when using suite_bin_packing
+
+    3.2 Error Handling & Validation
+
+    - Clear error messages for missing timing file
+    - Graceful fallback to individual tests if chunk metadata missing
+    - Warning messages for suite splitting (informational)
+    - Proper handling of chunk creation failures
+
+    Phase 4: Advanced Features
+
+    4.1 Chunk-Level Requeuing
+
+    - Individual test failure: Requeue just the failed test (extract from chunk)
+    - Chunk infrastructure failure: Requeue entire chunk
+    - Partial chunk completion: Mark completed tests, requeue remaining
+    - Update requeue counters and limits appropriately
+
+    4.2 Reporting Enhancements
+
+    Files: lib/minitest/queue/*_reporter.rb
+    - TestTimeReporter: Handle chunk duration reporting
+    - OrderReporter: Log chunk execution order
+    - BuildStatusReporter: Aggregate chunk vs individual test results
+    - JUnitReporter: Maintain individual test granularity in XML output
+
+    4.3 Monitoring & Diagnostics
+
+    - Chunk creation statistics (number of chunks, split suites, etc.)
+    - Chunk execution timing (compare estimated vs actual duration)
+    - Worker idle time analysis with chunk-based load balancing
+    - Redis memory usage for chunk metadata
+
+    Phase 5: Testing & Validation
+
+    5.1 Unit Tests
+
+    - TestChunk class functionality and interface compatibility
+    - SuiteBinPacking strategy algorithms (grouping, splitting, sorting)
+    - Chunk metadata serialization/deserialization
+    - Redis worker chunk resolution logic
+
+    5.2 Integration Tests
+
+    - End-to-end chunk creation and execution
+    - Mixed SingleExample and TestChunk processing
+    - Failure scenarios (chunk metadata missing, Redis errors)
+    - Requeuing behavior for both individual tests and chunks
+    - CLI option validation and error handling
+
+    5.3 Performance Tests
+
+    - Large test suite chunking performance
+    - Redis memory usage with chunk metadata
+    - Worker execution efficiency (chunk vs individual)
+    - Load balancing effectiveness across workers
+
+    File Structure
+
+    lib/ci/queue/
+    ├── test_chunk.rb                    # New TestChunk class
+    ├── strategy/
+    │   └── suite_bin_packing.rb        # New bin packing strategy
+    ├── configuration.rb                 # Enhanced with chunk config
+    ├── redis/
+    │   └── worker.rb                   # Enhanced chunk metadata handling
+    └── queue.rb                        # Updated to include TestChunk
+
+    lib/minitest/queue/
+    ├── runner.rb                       # Enhanced CLI options
+    └── *.rb                           # Updated reporters as needed
+
+    Configuration Examples
+
+    Bootstrap (Timing Collection)
+
+    minitest-queue --track-test-duration run
+    minitest-queue report --export-timing-file timing.json
+
+    Production (Chunk-Based Execution)
+
+    minitest-queue --track-test-duration \
+      --strategy suite_bin_packing \
+      --timing-file timing.json \
+      --suite-max-duration 120000 \
+      --chunk-buffer 10 \
+      run
+
+    minitest-queue report --export-timing-file timing.json
+
+    Risk Mitigation
+
+    - Backward Compatibility: All existing strategies continue working unchanged
+    - Graceful Degradation: Falls back to individual tests if chunk creation fails
+    - Redis Failure Handling: Proper error handling for missing chunk metadata
+    - Memory Management: TTL expiration for chunk metadata, monitoring for memory usage
+    - Testing Strategy: Comprehensive unit and integration testing before production use
+
+    Success Metrics
+
+    - Reduced worker idle time (fewer workers waiting for long-running suites)
+    - Maintained test fixture reuse (tests from same suite run together)
+    - Improved overall CI runtime through better load balancing
+    - Maintained test result granularity and debugging capability
+
+    Estimated Timeline
+
+    - Phase 1-2: 2-3 weeks (core infrastructure + strategy)
+    - Phase 3: 1 week (CLI integration)  
+    - Phase 4: 2 weeks (advanced features)
+    - Phase 5: 1-2 weeks (testing & validation)
+    - Total: 6-8 weeks for complete implementation
+  ⎿  Interrupted by user
+

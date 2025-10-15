@@ -249,7 +249,206 @@ class CI::Queue::RedisTest < Minitest::Test
     end
   end
 
+  def test_chunk_with_dynamic_timeout_not_stolen_by_other_worker
+    # Test that chunks with dynamic timeout (timeout * test_count) are not
+    # stolen by other workers before the dynamic timeout expires
+    @redis.flushdb
+
+    # Create a chunk with 10 tests from same suite -> timeout = 0.2s * 10 = 2.0s
+    tests = (1..10).map { |i| MockTest.new("ChunkSuite#test_#{i}") }
+
+    worker1 = worker(1, tests: tests, build_id: '100', strategy: :suite_bin_packing,
+                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+    worker2 = worker(2, tests: tests, build_id: '100', strategy: :suite_bin_packing,
+                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+
+    acquired = false
+    worker2_tried = false
+    worker2_got_test = false
+    monitor = Monitor.new
+    condition = monitor.new_cond
+
+    # Worker 2 thread: waits for worker1 to acquire, then tries to steal (should fail)
+    Thread.start do
+      monitor.synchronize do
+        condition.wait_until { acquired }
+        # Wait less than dynamic timeout (0.5s < 2.0s)
+        sleep 0.5
+        # Try to poll once - should not get anything since chunk hasn't timed out
+        # Use a timeout thread to force worker2 to give up after a short time
+        timeout_thread = Thread.new do
+          sleep 0.1 # Give worker2 a brief chance to try reserving
+          worker2.shutdown!
+        end
+        worker2.poll do |test|
+          worker2_got_test = true
+          worker2.acknowledge(test)
+          break
+        end
+        timeout_thread.kill
+        worker2_tried = true
+        condition.signal
+      end
+    end
+
+    # Worker 1: acquires chunk and holds it
+    reserved_test = nil
+    worker1.poll do |test|
+      reserved_test = test
+      refute_nil reserved_test
+      assert reserved_test.respond_to?(:chunk?) && reserved_test.chunk?, "Expected a chunk to be reserved"
+
+      # Signal worker2 to try stealing, then wait for it to finish trying
+      acquired = true
+      monitor.synchronize do
+        condition.signal
+        condition.wait_until { worker2_tried }
+      end
+
+      # Now acknowledge the chunk
+      worker1.acknowledge(test)
+      break
+    end
+
+    refute worker2_got_test, "Worker 2 should not steal chunk before dynamic timeout expires"
+  end
+
+  def test_chunk_with_dynamic_timeout_picked_up_after_timeout
+    @redis.flushdb
+
+    tests = (1..5).map { |i| MockTest.new("TimeoutSuite#test_#{i}") }
+
+    worker1 = worker(1, tests: tests, build_id: '101', strategy: :suite_bin_packing,
+                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+    worker2 = worker(2, tests: tests, build_id: '101', strategy: :suite_bin_packing,
+                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+
+    acquired = false
+    done = false
+    reserved_test = nil
+    stolen_test = nil
+    monitor = Monitor.new
+    condition = monitor.new_cond
+
+    # Worker 2 thread: waits for worker1 to acquire, then waits for timeout and steals
+    Thread.start do
+      monitor.synchronize do
+        condition.wait_until { acquired }
+        # Wait longer than dynamic timeout (1.2s > 1.0s)
+        sleep 1.2
+        # Now poll - should successfully steal the timed-out chunk
+        worker2.poll do |test|
+          stolen_test = test
+          worker2.acknowledge(test)
+          break
+        end
+        done = true
+        condition.signal
+      end
+    end
+
+    # Worker 1: acquires chunk and holds it without acknowledging
+    worker1.poll do |test|
+      reserved_test = test
+      refute_nil reserved_test
+      assert reserved_test.respond_to?(:chunk?) && reserved_test.chunk?, "Expected a chunk to be reserved"
+
+      # Signal worker2 to start waiting, then wait for it to steal the chunk
+      acquired = true
+      monitor.synchronize do
+        condition.signal
+        condition.wait_until { done }
+      end
+      break
+    end
+
+    refute_nil stolen_test, "Worker 2 should pick up chunk after dynamic timeout expires"
+    assert_equal reserved_test.id, stolen_test.id
+
+    # Verify the RESERVED_LOST_TEST warning was recorded
+    warnings = worker2.build.pop_warnings
+    assert_equal 1, warnings.size
+    assert_equal :RESERVED_LOST_TEST, warnings.first.first
+  end
+
+  def test_individual_test_uses_default_timeout_after_requeue
+    # Test that individual tests (not in chunks) use the default timeout
+    @redis.flushdb
+
+    # Create individual tests from different suites (won't be chunked together)
+    tests = [
+      MockTest.new("SuiteA#test_1"),
+      MockTest.new("SuiteB#test_1"),
+      MockTest.new("SuiteC#test_1")
+    ]
+
+    worker1 = worker(1, tests: tests, build_id: '102', timeout: 0.2)
+    worker2 = worker(2, tests: tests, build_id: '102', timeout: 0.2)
+
+    acquired = false
+    done = false
+    reserved_test = nil
+    stolen_test = nil
+    monitor = Monitor.new
+    condition = monitor.new_cond
+
+    # Worker 2 thread: waits for worker1 to acquire, then waits for default timeout and steals
+    Thread.start do
+      monitor.synchronize do
+        condition.wait_until { acquired }
+        # Wait for default timeout (0.3s > 0.2s default)
+        sleep 0.3
+        # Now poll - should successfully steal the timed-out test
+        worker2.poll do |test|
+          stolen_test = test
+          worker2.acknowledge(test)
+          break
+        end
+        done = true
+        condition.signal
+      end
+    end
+
+    # Worker 1: acquires an individual test and holds it without acknowledging
+    worker1.poll do |test|
+      reserved_test = test
+      refute_nil reserved_test
+      refute (reserved_test.respond_to?(:chunk?) && reserved_test.chunk?), "Expected an individual test, not a chunk"
+
+      # Signal worker2 to start waiting, then wait for it to steal the test
+      acquired = true
+      monitor.synchronize do
+        condition.signal
+        condition.wait_until { done }
+      end
+      break
+    end
+
+    refute_nil stolen_test, "Worker 2 should steal individual test after default timeout"
+    assert_equal reserved_test.id, stolen_test.id
+  end
+
   private
+
+  class MockTest
+    attr_reader :id
+
+    def initialize(id)
+      @id = id
+    end
+
+    def <=>(other)
+      id <=> other.id
+    end
+
+    def flaky?
+      false
+    end
+
+    def tests
+      [self]
+    end
+  end
 
   def shuffled_test_list
     CI::Queue.shuffle(TEST_LIST, Random.new(0)).freeze
