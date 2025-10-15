@@ -23,15 +23,15 @@ module CI
 
           time_left = config.report_timeout
           time_left_with_no_workers = config.inactive_workers_timeout
-          last_heartbeat_time = Time.now
+          last_heartbeat_time = CI::Queue.time_now
           until exhausted? || time_left <= 0 || max_test_failed? || time_left_with_no_workers <= 0
             time_left -= 1
             sleep 1
 
             # Heartbeat log every 5 minutes
-            if Time.now - last_heartbeat_time > 300
+            if CI::Queue.time_now - last_heartbeat_time > 300
               puts '[ci-queue] Still working'
-              last_heartbeat_time = Time.now
+              last_heartbeat_time = CI::Queue.time_now
             end
 
             if active_workers?
@@ -53,7 +53,7 @@ module CI
 
         def active_workers?
           # if there are running jobs we assume there are still agents active
-          redis.zrangebyscore(key('running'), Time.now.to_f - config.timeout, "+inf", limit: [0,1]).count > 0
+          redis.zrangebyscore(key('running'), CI::Queue.time_now.to_f - config.timeout, "+inf", limit: [0,1]).count > 0
         end
       end
     end
