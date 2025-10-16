@@ -7,10 +7,6 @@ module CI
 
       attr_reader :id, :suite_name, :type, :test_ids, :estimated_duration, :test_count
 
-      # type can be :full_suite or :partial_suite
-      # For full_suite, test_ids should contain all test IDs for timeout calculation during populate
-      # For partial_suite, test_ids contains only the tests in this chunk
-      # test_count: explicit test count (useful for full_suite when deserializing from Redis)
       def initialize(id, suite_name, type, test_ids, estimated_duration = 0, test_count: nil)
         @id = id
         @suite_name = suite_name
