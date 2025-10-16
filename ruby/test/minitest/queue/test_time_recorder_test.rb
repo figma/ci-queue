@@ -21,7 +21,7 @@ module Minitest::Queue
     end
 
     def test_record_when_test_pass
-      test = MiniTest::Mock.new
+      test = Minitest::Mock.new
       test.expect(:passed?, true)
       test.expect(:klass, 'SomeClass')
       test.expect(:name, 'test_something')
@@ -34,7 +34,7 @@ module Minitest::Queue
     end
 
     def test_record_do_nothing_when_test_failed
-      test = MiniTest::Mock.new
+      test = Minitest::Mock.new
       test.expect(:passed?, false)
       @test_time_recorder.record(test)
 
