@@ -54,6 +54,10 @@ module CI
         end
 
         def create_chunks_for_suite(suite_name, suite_tests, max_duration, buffer_percent, timing_data, fallback_duration)
+          if suite_name.nil? || suite_name.empty?
+            byebug
+          end
+
           # Calculate total suite duration
           total_duration = suite_tests.sum do |test|
             get_test_duration(test.id, timing_data, fallback_duration)

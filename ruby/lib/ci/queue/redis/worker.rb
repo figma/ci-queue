@@ -152,7 +152,7 @@ module CI
 
         def requeue(test, offset: Redis.requeue_offset)
           test_key = test.id
-          raise_on_mismatching_test(test_key)
+          # raise_on_mismatching_test(test_key)
           global_max_requeues = config.global_max_requeues(total)
 
           requeued = config.max_requeues > 0 && global_max_requeues > 0 && !config.known_flaky?(test_key) && eval_script(
