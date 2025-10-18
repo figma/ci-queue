@@ -5,15 +5,19 @@ module CI
     class TestChunk
       include Comparable
 
-      attr_reader :id, :suite_name, :type, :test_ids, :estimated_duration
+      attr_reader :id, :suite_name, :type, :test_ids, :estimated_duration, :test_count
 
       # type can be :full_suite or :partial_suite
-      def initialize(id, suite_name, type, test_ids, estimated_duration = 0)
+      # For full_suite, test_ids should contain all test IDs for timeout calculation during populate
+      # For partial_suite, test_ids contains only the tests in this chunk
+      # test_count: explicit test count (useful for full_suite when deserializing from Redis)
+      def initialize(id, suite_name, type, test_ids, estimated_duration = 0, test_count: nil)
         @id = id
         @suite_name = suite_name
         @type = type
         @test_ids = test_ids.freeze
         @estimated_duration = estimated_duration
+        @test_count = test_count || test_ids.size
       end
 
       def full_suite?
@@ -38,7 +42,8 @@ module CI
         data = {
           type: type.to_s,
           suite_name: suite_name,
-          estimated_duration: estimated_duration
+          estimated_duration: estimated_duration,
+          test_count: test_count
         }
 
         # Only include test_ids for partial suites
@@ -55,7 +60,8 @@ module CI
           data['suite_name'],
           data['type'].to_sym,
           data['test_ids'] || [], # Empty for full_suite
-          data['estimated_duration']
+          data['estimated_duration'],
+          test_count: data['test_count']
         )
       end
     end
