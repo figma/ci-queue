@@ -150,9 +150,9 @@ module CI
           ) == 1
         end
 
-        def requeue(test, offset: Redis.requeue_offset)
+        def requeue(test, offset: Redis.requeue_offset, skip_reservation_check: false)
           test_key = test.id
-          raise_on_mismatching_test(test_key)
+          raise_on_mismatching_test(test_key) unless skip_reservation_check
           global_max_requeues = config.global_max_requeues(total)
 
           requeued = config.max_requeues > 0 && global_max_requeues > 0 && !config.known_flaky?(test_key) && eval_script(
@@ -168,7 +168,7 @@ module CI
             argv: [config.max_requeues, global_max_requeues, test_key, offset],
           ) == 1
 
-          @reserved_test = test_key unless requeued
+          @reserved_test = test_key unless requeued || skip_reservation_check
           requeued
         end
 
