@@ -325,7 +325,7 @@ module Minitest
       # Requeue failed tests individually (breaking them out of chunk)
       failed_tests.each do |test|
         if CI::Queue.requeueable?(test) && !queue.config.known_flaky?(test.id)
-          queue.requeue(test)
+          queue.requeue(test, skip_reservation_check: true)
         end
       end
     end
