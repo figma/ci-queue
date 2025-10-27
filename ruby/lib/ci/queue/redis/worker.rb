@@ -370,12 +370,13 @@ module CI
 
         # Represents a chunk with resolved test objects
         class ResolvedChunk
-          attr_reader :chunk_id, :suite_name, :tests
+          attr_reader :chunk_id, :suite_name, :tests, :estimated_duration
 
           def initialize(chunk, tests)
             @chunk_id = chunk.id
             @suite_name = chunk.suite_name
             @tests = tests.freeze
+            @estimated_duration = chunk.estimated_duration
           end
 
           def id
