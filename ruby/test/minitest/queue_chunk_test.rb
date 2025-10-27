@@ -185,7 +185,7 @@ class QueueChunkTest < Minitest::Test
       @acknowledged << id
     end
 
-    def requeue(test)
+    def requeue(test, **kwargs)
       @requeued_tests << test
       false # Don't actually requeue in test
     end
