@@ -21,6 +21,10 @@ module CI
           redis.hkeys(key('error-reports'))
         end
 
+        def passing_tests
+          redis.lrange(key('list_of_test_names'), 0, -1)
+        end
+
         TOTAL_KEY = "___total___"
         def requeued_tests
           requeues = redis.hgetall(key('requeues-count'))
