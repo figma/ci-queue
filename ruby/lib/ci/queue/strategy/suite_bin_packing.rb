@@ -8,6 +8,7 @@ module CI
       class SuiteBinPacking < Base
         def order_tests(tests, random: Random.new, config: nil)
           timing_data = load_timing_data(config&.timing_file)
+          pp timing_data if ENV['VERBOSE']
           max_duration = config&.suite_max_duration || 120_000
           fallback_duration = config&.timing_fallback_duration || 100.0
           buffer_percent = config&.suite_buffer_percent || 10
@@ -50,7 +51,12 @@ module CI
         end
 
         def get_test_duration(test_id, timing_data, fallback_duration)
-          timing_data[test_id]&.to_f || fallback_duration
+          if timing_data.key?(test_id)
+            timing_data[test_id].to_f
+          else
+            puts "WARN: No timing data for #{test_id}, using fallback duration #{fallback_duration}s" if ENV['VERBOSE']
+            fallback_duration
+          end
         end
 
         def create_chunks_for_suite(suite_name, suite_tests, max_duration, buffer_percent, timing_data, fallback_duration)
