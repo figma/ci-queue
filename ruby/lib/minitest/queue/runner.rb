@@ -83,8 +83,25 @@ module Minitest
         end
         Minitest.queue_reporters = reporters
 
-        trap('TERM') { Minitest.queue.shutdown! }
-        trap('INT') { Minitest.queue.shutdown! }
+        trap('TERM') {
+          puts "Received TERM signal, shutting down..."
+          Minitest.queue.shutdown!
+          begin
+            release_command
+          rescue StandardError => e
+            puts "Received error while releasing reserved tests during shutdown: #{e.message}"
+          end
+        }
+
+        trap('INT') {
+          puts "Received INT signal, shutting down..."
+          Minitest.queue.shutdown!
+          begin
+            release_command
+          rescue StandardError => e
+            puts "Received error while releasing reserved tests during shutdown: #{e.message}"
+          end
+        }
 
         if queue.rescue_connection_errors { queue.exhausted? }
           puts green('All tests were ran already')
