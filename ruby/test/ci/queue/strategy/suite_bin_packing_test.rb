@@ -2,14 +2,16 @@
 require 'test_helper'
 require 'tempfile'
 
+require 'minitest/focus'
+
 class SuiteBinPackingTest < Minitest::Test
   def setup
-    @strategy = CI::Queue::Strategy::SuiteBinPacking.new
     @config = CI::Queue::Configuration.new(
       suite_max_duration: 120_000,
       suite_buffer_percent: 10,
       timing_fallback_duration: 100.0
     )
+    @strategy = CI::Queue::Strategy::SuiteBinPacking.new(@config)
   end
 
   def test_groups_tests_by_suite
@@ -19,7 +21,7 @@ class SuiteBinPackingTest < Minitest::Test
       'OrderTest#test_1'
     ])
 
-    chunks = @strategy.order_tests(tests, config: @config)
+    chunks = @strategy.order_tests(tests)
 
     suite_names = chunks.map(&:suite_name).uniq
     assert_includes suite_names, 'UserTest'
@@ -115,7 +117,7 @@ class SuiteBinPackingTest < Minitest::Test
   end
 
   def test_handles_empty_test_list
-    chunks = @strategy.order_tests([], config: @config)
+    chunks = @strategy.order_tests([])
     assert_equal [], chunks
   end
 
@@ -123,7 +125,7 @@ class SuiteBinPackingTest < Minitest::Test
     tests = create_mock_tests(['TestA#test_1'])
     @config.timing_file = '/nonexistent/file.json'
 
-    chunks = @strategy.order_tests(tests, config: @config)
+    chunks = @strategy.order_tests(tests)
 
     # Should use fallback duration
     assert_equal 1, chunks.size
@@ -138,7 +140,7 @@ class SuiteBinPackingTest < Minitest::Test
       file.close
 
       @config.timing_file = file.path
-      chunks = @strategy.order_tests(tests, config: @config)
+      chunks = @strategy.order_tests(tests)
 
       # Should use fallback duration
       assert_equal 1, chunks.size
@@ -148,8 +150,8 @@ class SuiteBinPackingTest < Minitest::Test
 
   def test_chunk_ids_are_deterministic
     tests = create_mock_tests(['TestSuite#test_1'])
-    chunks1 = @strategy.order_tests(tests, config: @config)
-    chunks2 = @strategy.order_tests(tests, config: @config)
+    chunks1 = @strategy.order_tests(tests)
+    chunks2 = @strategy.order_tests(tests)
 
     assert_equal chunks1.first.id, chunks2.first.id
   end
@@ -177,7 +179,7 @@ class SuiteBinPackingTest < Minitest::Test
 
   def test_full_suite_chunk_id_format
     tests = create_mock_tests(['SmallTest#test_1'])
-    chunks = @strategy.order_tests(tests, config: @config)
+    chunks = @strategy.order_tests(tests)
 
     chunk = chunks.find { |c| c.suite_name == 'SmallTest' }
     assert_equal 'SmallTest:full_suite', chunk.id
@@ -197,7 +199,9 @@ class SuiteBinPackingTest < Minitest::Test
       file.close
 
       @config.timing_file = file.path
-      @strategy.order_tests(tests, config: @config)
+      # Recreate strategy to load the new timing data
+      strategy = CI::Queue::Strategy::SuiteBinPacking.new(@config)
+      strategy.order_tests(tests)
     end
   end
 

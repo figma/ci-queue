@@ -30,7 +30,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     ]
 
     # Simulate strategy returning chunks
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -51,7 +51,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', :partial_suite, test_ids, 3000.0)
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -87,7 +87,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 3000.0)
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -108,7 +108,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', :partial_suite, test_ids, 2000.0)
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -178,7 +178,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       tests[1] # Individual test
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -194,7 +194,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 1000.0)
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -209,7 +209,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       CI::Queue::TestChunk.new("TestSuite#{i}:full_suite", "TestSuite#{i}", :full_suite, [], 1000.0)
     end
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 

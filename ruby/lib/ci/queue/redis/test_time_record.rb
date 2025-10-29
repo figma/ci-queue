@@ -5,7 +5,9 @@ module CI
       class TestTimeRecord < Worker
         def record(test_name, duration)
           record_test_time(test_name, duration)
+          record_test_duration_moving_average(test_name, duration)
           record_test_name(test_name)
+
         end
 
         def fetch
@@ -27,6 +29,10 @@ module CI
             pipeline.expire(test_time_key(test_name), config.redis_ttl)
           end
           nil
+        end
+
+        def record_test_duration_moving_average(test_name, duration)
+          MovingAverage.new(redis).update(test_name, duration)
         end
 
         def record_test_name(test_name)
