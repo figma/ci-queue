@@ -10,6 +10,7 @@ module CI
       attr_accessor :max_test_failed, :redis_ttl
       attr_accessor :strategy, :timing_file, :timing_fallback_duration, :export_timing_file
       attr_accessor :suite_max_duration, :suite_buffer_percent
+      attr_accessor :timing_redis_key, :timing_ema_alpha, :timing_hscan_count
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
       attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
@@ -55,7 +56,8 @@ module CI
         queue_init_timeout: nil, redis_ttl: 8 * 60 * 60, report_timeout: nil, inactive_workers_timeout: nil,
         export_flaky_tests_file: nil, known_flaky_tests: [],
         strategy: :random, timing_file: nil, timing_fallback_duration: 100.0, export_timing_file: nil,
-        suite_max_duration: 120_000, suite_buffer_percent: 10
+        suite_max_duration: 120_000, suite_buffer_percent: 10,
+        timing_redis_key: 'timing_data', timing_ema_alpha: 0.2, timing_hscan_count: 1000
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
@@ -87,6 +89,9 @@ module CI
         @export_timing_file = export_timing_file
         @suite_max_duration = suite_max_duration
         @suite_buffer_percent = suite_buffer_percent
+        @timing_redis_key = timing_redis_key
+        @timing_ema_alpha = timing_ema_alpha
+        @timing_hscan_count = timing_hscan_count
       end
 
       def queue_init_timeout

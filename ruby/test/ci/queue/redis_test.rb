@@ -451,7 +451,7 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def shuffled_test_list
-    CI::Queue.shuffle(TEST_LIST, Random.new(0)).freeze
+    CI::Queue.order_tests(TEST_LIST, Random.new(0)).freeze
   end
 
   def build_queue

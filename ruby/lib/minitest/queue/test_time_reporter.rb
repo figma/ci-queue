@@ -13,6 +13,7 @@ module Minitest
         @limit = limit
         @percentile = percentile
         @export_file = export_file
+        @build = build
         @success = true
       end
 
@@ -52,15 +53,40 @@ module Minitest
       attr_reader :test_time_hash, :limit, :percentile
 
       def export_timing_data
-        return if test_time_hash.empty?
+        timing_data = {}
 
-        # Convert test_time_hash to simple format: {"TestClass#method": avg_duration_ms}
-        timing_data = test_time_hash.transform_values do |durations|
-          durations.sum.to_f / durations.size  # Average duration
+        # Try to export from Redis EMA first (preferred)
+        if @build.respond_to?(:redis) && @build.respond_to?(:config)
+          begin
+            require 'ci/queue/redis/exponential_moving_average'
+            timing_ema = CI::Queue::Redis::ExponentialMovingAverage.new(
+              @build.redis,
+              hash_key: @build.config.timing_redis_key || 'timing_data'
+            )
+            timing_data = timing_ema.export_all
+
+            unless timing_data.empty?
+              puts "Exported #{timing_data.size} timing entries from Redis EMA to #{@export_file}"
+            end
+          rescue ::Redis::BaseError => e
+            warn "Warning: Failed to export from Redis EMA: #{e.message}, falling back to list data"
+          rescue => e
+            # Silently fall through to list-based export if EMA is not available
+          end
         end
 
+        # Fallback: export from test_time_hash (list-based data) if Redis EMA unavailable or empty
+        if timing_data.empty? && !test_time_hash.empty?
+          # Convert test_time_hash to simple format: {"TestClass#method": avg_duration_ms}
+          timing_data = test_time_hash.transform_values do |durations|
+            durations.sum.to_f / durations.size  # Average duration
+          end
+          puts "Exported timing data for #{timing_data.size} tests to #{@export_file}"
+        end
+
+        return if timing_data.empty?
+
         File.write(@export_file, JSON.pretty_generate(timing_data))
-        puts "Exported timing data for #{timing_data.size} tests to #{@export_file}"
       rescue => e
         puts "Warning: Failed to export timing data to #{@export_file}: #{e.message}"
       end

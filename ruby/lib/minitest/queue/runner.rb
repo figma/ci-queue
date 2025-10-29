@@ -632,6 +632,30 @@ module Minitest
             queue_config.suite_buffer_percent = percent
           end
 
+          help = <<~EOS
+            Redis hash key for timing data (default: timing_data)
+          EOS
+          opts.separator ""
+          opts.on('--timing-redis-key KEY', help) do |key|
+            queue_config.timing_redis_key = key
+          end
+
+          help = <<~EOS
+            EMA smoothing factor for timing updates, 0.0-1.0 (default: 0.2)
+          EOS
+          opts.separator ""
+          opts.on('--timing-ema-alpha ALPHA', Float, help) do |alpha|
+            queue_config.timing_ema_alpha = alpha
+          end
+
+          help = <<~EOS
+            HSCAN batch size for loading timing data (default: 1000)
+          EOS
+          opts.separator ""
+          opts.on('--timing-hscan-count COUNT', Integer, help) do |count|
+            queue_config.timing_hscan_count = count
+          end
+
           opts.separator ""
           opts.separator "    retry: Replays a previous run in the same order."
 

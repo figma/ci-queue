@@ -30,7 +30,7 @@ module CI
 
         def populate(tests, random: Random.new)
           @index = tests.map { |t| [t.id, t] }.to_h
-          executables = Queue.shuffle(tests, random, config: config)
+          executables = Queue.reorder_tests(tests, random, config: config, redis: redis)
 
           # Separate chunks from individual tests
           chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }

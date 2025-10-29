@@ -1,4 +1,6 @@
 # frozen_string_literal: true
+require_relative 'exponential_moving_average'
+
 module CI
   module Queue
     module Redis
@@ -6,6 +8,7 @@ module CI
         def record(test_name, duration)
           record_test_time(test_name, duration)
           record_test_name(test_name)
+          record_test_time_ema(test_name, duration)
         end
 
         def fetch
@@ -58,6 +61,17 @@ module CI
 
         def test_time_key(test_name)
           "build:#{config.build_id}:#{test_name}".dup.force_encoding(Encoding::BINARY)
+        end
+
+        def record_test_time_ema(test_name, duration)
+          timing_ema = ExponentialMovingAverage.new(
+            redis,
+            hash_key: config.timing_redis_key || 'timing_data',
+            alpha: config.timing_ema_alpha || 0.2
+          )
+          timing_ema.update(test_name, duration)
+        rescue ::Redis::BaseError => e
+          warn "Warning: Failed to update EMA timing for #{test_name}: #{e.message}"
         end
       end
     end

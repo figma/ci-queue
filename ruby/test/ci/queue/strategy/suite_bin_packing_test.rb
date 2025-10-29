@@ -4,12 +4,12 @@ require 'tempfile'
 
 class SuiteBinPackingTest < Minitest::Test
   def setup
-    @strategy = CI::Queue::Strategy::SuiteBinPacking.new
     @config = CI::Queue::Configuration.new(
       suite_max_duration: 120_000,
       suite_buffer_percent: 10,
       timing_fallback_duration: 100.0
     )
+    @strategy = CI::Queue::Strategy::SuiteBinPacking.new(@config)
   end
 
   def test_groups_tests_by_suite

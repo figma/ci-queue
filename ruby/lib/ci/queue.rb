@@ -23,7 +23,7 @@ module CI
   module Queue
     extend self
 
-    attr_accessor :shuffler, :requeueable
+    attr_accessor :requeueable
 
     module Warnings
       RESERVED_LOST_TEST = :RESERVED_LOST_TEST
@@ -42,13 +42,9 @@ module CI
       requeueable.nil? || requeueable.call(test_result)
     end
 
-    def shuffle(tests, random, config: nil)
-      if shuffler
-        shuffler.call(tests, random)
-      else
-        strategy = get_strategy(config&.strategy)
-        strategy.order_tests(tests, random: random, config: config)
-      end
+    def reorder_tests(tests, random, config: nil, redis: nil)
+      strategy = get_strategy(config&.strategy, config)
+      strategy.order_tests(tests, random: random, redis: redis)
     end
 
     def from_uri(url, config)
@@ -69,14 +65,14 @@ module CI
 
     private
 
-    def get_strategy(strategy_name)
+    def get_strategy(strategy_name, config)
       case strategy_name&.to_sym
       when :timing_based
-        Strategy::TimingBased.new
+        Strategy::TimingBased.new(config)
       when :suite_bin_packing
-        Strategy::SuiteBinPacking.new
+        Strategy::SuiteBinPacking.new(config)
       else
-        Strategy::Random.new
+        Strategy::Random.new(config)
       end
     end
   end

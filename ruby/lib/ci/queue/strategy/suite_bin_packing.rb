@@ -1,13 +1,15 @@
 # frozen_string_literal: true
 require_relative 'base'
+require_relative '../redis/exponential_moving_average'
 require 'json'
 
 module CI
   module Queue
     module Strategy
       class SuiteBinPacking < Base
-        def order_tests(tests, random: Random.new, config: nil)
-          timing_data = load_timing_data(config&.timing_file)
+        def order_tests(tests, random: Random.new, config: nil, redis: nil)
+          timing_data = load_timing_data(config, redis)
+          pp timing_data if ENV['VERBOSE']
           max_duration = config&.suite_max_duration || 120_000
           fallback_duration = config&.timing_fallback_duration || 100.0
           buffer_percent = config&.suite_buffer_percent || 10
@@ -40,13 +42,33 @@ module CI
           test_id.split('#').first
         end
 
-        def load_timing_data(file_path)
-          return {} unless file_path && ::File.exist?(file_path)
+        def load_timing_data(config, redis)
+          timing_data = {}
 
-          JSON.parse(::File.read(file_path))
-        rescue JSON::ParserError => e
-          warn "Warning: Could not parse timing file #{file_path}: #{e.message}"
-          {}
+          if redis
+            begin
+              timing_ema = CI::Queue::Redis::ExponentialMovingAverage.new(
+                redis,
+                hash_key: config&.timing_redis_key || 'timing_data'
+              )
+
+              timing_data = timing_ema.load_all(count: config&.timing_hscan_count || 1000)
+              puts "Loaded #{timing_data.size} timing entries from Redis via HSCAN" if ENV['VERBOSE']
+            rescue ::Redis::BaseError => e
+              warn "Warning: Failed to load timing data from Redis: #{e.message}"
+            end
+          end
+
+          if timing_data.empty? && config&.timing_file && ::File.exist?(config.timing_file)
+            begin
+              timing_data = JSON.parse(::File.read(config.timing_file))
+              puts "Loaded #{timing_data.size} timing entries from file #{config.timing_file}" if ENV['VERBOSE']
+            rescue JSON::ParserError => e
+              warn "Warning: Could not parse timing file #{config.timing_file}: #{e.message}"
+            end
+          end
+
+          timing_data
         end
 
         def get_test_duration(test_id, timing_data, fallback_duration)
@@ -131,6 +153,22 @@ module CI
           end
 
           chunks
+        end
+
+        private def load_timing_data_from_redis
+          if redis
+            begin
+              timing_ema = CI::Queue::Redis::ExponentialMovingAverage.new(
+                redis,
+                hash_key: config&.timing_redis_key || 'timing_data'
+              )
+
+              timing_data = timing_ema.load_all(count: config&.timing_hscan_count || 1000)
+              puts "Loaded #{timing_data.size} timing entries from Redis via HSCAN" if ENV['VERBOSE']
+            rescue ::Redis::BaseError => e
+              warn "Warning: Failed to load timing data from Redis: #{e.message}"
+            end
+          end
         end
       end
     end
