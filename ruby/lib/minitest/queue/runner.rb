@@ -210,6 +210,8 @@ module Minitest
           end
         end
 
+        reconcile_test_results(supervisor.build)
+
         reporter = BuildStatusReporter.new(build: supervisor.build)
 
         if queue_config.failure_file
@@ -239,6 +241,15 @@ module Minitest
 
         reporter.report
         exit! reporter.success? && test_time_reporter_success ? 0 : 1
+      end
+
+      def reconcile_test_results(build)
+        passing_tests = build.passing_tests
+        build.failed_tests.each do |test_id|
+          if passing_tests.include?(test_id)
+            build.record_success(test_id)
+          end
+        end
       end
 
       def report_grind_command
