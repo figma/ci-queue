@@ -243,7 +243,7 @@ module Minitest
       chunk_failed = false
       failed_tests = []
 
-      puts "Running chunk: #{chunk.suite_name} (#{chunk.size} tests) :: Estimated Duration: (#{chunk.estimated_duration}s)" if ENV['VERBOSE']
+      puts "Running chunk: #{chunk.suite_name} (#{chunk.size} tests) :: Estimated Duration: (#{chunk.estimated_duration / 1000}s)" if ENV['VERBOSE']
 
       # Run each test in the chunk sequentially
       chunk.tests.each do |test|

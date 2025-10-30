@@ -29,7 +29,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 5000.0, test_count: 3)
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -45,8 +45,8 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     small_tests = create_mock_tests((1..5).map { |i| "SmallSuite#test_#{i}" })
     small_chunk = CI::Queue::TestChunk.new('SmallSuite:full_suite', 'SmallSuite', :full_suite, [], 1000.0, test_count: 5)
 
-    CI::Queue.stub(:shuffle, [small_chunk]) do
-      worker = CI::Queue::Redis.new(@redis_url, @config)
+    worker = CI::Queue::Redis.new(@redis_url, @config)
+    worker.stub(:reorder_tests, [small_chunk]) do
       worker.populate(small_tests)
     end
 
@@ -59,8 +59,8 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     large_tests = create_mock_tests((1..20).map { |i| "LargeSuite#test_#{i}" })
     large_chunk = CI::Queue::TestChunk.new('LargeSuite:full_suite', 'LargeSuite', :full_suite, [], 5000.0, test_count: 20)
 
-    CI::Queue.stub(:shuffle, [large_chunk]) do
-      worker = CI::Queue::Redis.new(@redis_url, @config)
+    worker = CI::Queue::Redis.new(@redis_url, @config)
+    worker.stub(:reorder_tests, [large_chunk]) do
       worker.populate(large_tests)
     end
 
@@ -81,7 +81,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       CI::Queue::TestChunk.new('TestC:full_suite', 'TestC', :full_suite, [], 1000.0, test_count: 1),
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -97,7 +97,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 1000.0, test_count: 2)
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -110,7 +110,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     tests = create_mock_tests(['TestA#test_1', 'TestB#test_1'])
 
     # Return individual tests, not chunks
-    CI::Queue.stub(:shuffle, tests) do
+    @worker.stub(:reorder_tests, tests) do
       @worker.populate(tests)
     end
 
@@ -132,7 +132,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       CI::Queue::TestChunk.new('TestC:full_suite', 'TestC', :full_suite, [], 3000.0, test_count: 3),
     ]
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
@@ -147,7 +147,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
   def test_reserve_test_passes_dynamic_deadline_flag
     tests = create_mock_tests(['TestA#test_1'])
 
-    CI::Queue.stub(:shuffle, tests) do
+    @worker.stub(:reorder_tests, tests) do
       @worker.populate(tests)
     end
 
@@ -177,7 +177,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
   def test_reserve_lost_test_passes_dynamic_deadline_flag
     tests = create_mock_tests(['TestA#test_1'])
 
-    CI::Queue.stub(:shuffle, tests) do
+    @worker.stub(:reorder_tests, tests) do
       @worker.populate(tests)
     end
 
@@ -218,7 +218,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     tests = create_mock_tests((1..5).map { |i| "TestSuite#test_#{i}" })
     chunk = CI::Queue::TestChunk.new('TestSuite:full_suite', 'TestSuite', :full_suite, [], 5000.0, test_count: 5)
 
-    CI::Queue.stub(:shuffle, [chunk]) do
+    worker1.stub(:reorder_tests, [chunk]) do
       worker1.populate(tests)
     end
 
@@ -251,7 +251,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     # Populate with single test (no chunk)
     tests = create_mock_tests(['TestA#test_1'])
 
-    CI::Queue.stub(:shuffle, tests) do
+    worker1.stub(:reorder_tests, tests) do
       worker1.populate(tests)
     end
 
@@ -278,7 +278,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       CI::Queue::TestChunk.new("TestSuite#{i}:full_suite", "TestSuite#{i}", :full_suite, [], 1000.0, test_count: 1)
     end
 
-    CI::Queue.stub(:shuffle, chunks) do
+    @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
