@@ -2,8 +2,6 @@
 require 'test_helper'
 require 'tempfile'
 
-require 'minitest/focus'
-
 class SuiteBinPackingTest < Minitest::Test
   def setup
     @config = CI::Queue::Configuration.new(
