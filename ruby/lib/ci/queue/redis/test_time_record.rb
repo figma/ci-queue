@@ -32,7 +32,7 @@ module CI
         end
 
         def record_test_duration_moving_average(test_name, duration)
-          MovingAverage.new(redis).update(test_name, duration)
+          UpdateTestDurationMovingAverage.new(redis).update(test_name, duration)
         end
 
         def record_test_name(test_name)

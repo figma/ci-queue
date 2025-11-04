@@ -10,7 +10,8 @@ require 'ci/queue/redis/retry'
 require 'ci/queue/redis/supervisor'
 require 'ci/queue/redis/grind_supervisor'
 require 'ci/queue/redis/test_time_record'
-require 'ci/queue/redis/moving_average'
+require 'ci/queue/redis/test_duration_moving_averages'
+require 'ci/queue/redis/update_test_duration_moving_average'
 
 module CI
   module Queue

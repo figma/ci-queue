@@ -3,10 +3,7 @@
 module CI
   module Queue
     module Redis
-      # Represents a redis hash of moving averages for test durations
-      #
-      # Moving average is calculated using exponential moving average formula
-      class MovingAverage
+      class UpdateTestDurationMovingAverage
         LUA_SCRIPT= <<~LUA
           local hash_key = KEYS[1]
           local test_id = ARGV[1]
@@ -28,36 +25,10 @@ module CI
           @redis = redis
           @key = key
           @smoothing_factor = smoothing_factor
-          @values = {}
-        end
-
-        def [](test_id)
-          load_all if @values.empty?
-          @values[test_id]
         end
 
         def update(test_id, duration)
-          new_avg = @redis.eval(LUA_SCRIPT, keys: [@key], argv: [test_id, duration, @smoothing_factor])
-          @values[test_id] = new_avg.to_f
-          new_avg.to_f
-        end
-
-        def load_all
-          batch_size = 1000
-          cursor = '0'
-          @values = {}
-
-          loop do
-            cursor, batch = @redis.hscan(@key, cursor, count: batch_size)
-            batch.each do |test_id, value|
-              @values[test_id] = value.to_f
-            end
-            break if cursor == '0'
-          end
-        end
-
-        def size
-          @redis.hlen(@key)
+          @redis.eval(LUA_SCRIPT, keys: [@key], argv: [test_id, duration, @smoothing_factor]).to_f
         end
       end
     end

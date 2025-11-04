@@ -21,7 +21,7 @@ module CI
           super(config)
 
           if redis
-            @moving_average = CI::Queue::Redis::MovingAverage.new(redis)
+            @moving_average = CI::Queue::Redis::TestDurationMovingAverages.new(redis)
           end
 
           if config&.timing_file
