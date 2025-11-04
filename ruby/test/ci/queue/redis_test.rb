@@ -12,6 +12,10 @@ class CI::Queue::RedisTest < Minitest::Test
     @config = @queue.send(:config) # hack
   end
 
+  def teardown
+    @redis.flushdb
+  end
+
   def test_from_uri
     second_queue = populate(
       CI::Queue.from_uri(@redis_url, config)
@@ -260,7 +264,7 @@ class CI::Queue::RedisTest < Minitest::Test
     worker1 = worker(1, tests: tests, build_id: '100', strategy: :suite_bin_packing,
                      suite_max_duration: 120_000, timing_fallback_duration: 100.0)
     worker2 = worker(2, tests: tests, build_id: '100', strategy: :suite_bin_packing,
-                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+                     suite_max_duration: 120_000, timing_fallback_duration: 100.0, populate: false)
 
     acquired = false
     worker2_tried = false
@@ -428,6 +432,234 @@ class CI::Queue::RedisTest < Minitest::Test
     assert_equal reserved_test.id, stolen_test.id
   end
 
+  def test_suite_bin_packing_uses_moving_average_for_duration
+    @redis.flushdb
+
+    updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
+    updater.update('TestSuite#test_1', 5000.0)
+    updater.update('TestSuite#test_2', 3000.0)
+
+    tests = [
+      MockTest.new('TestSuite#test_1'),
+      MockTest.new('TestSuite#test_2')
+    ]
+
+    worker = worker(1, tests: tests, build_id: '200', strategy: :suite_bin_packing,
+                    suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+
+    chunks = []
+    worker.poll do |chunk|
+      chunks << chunk
+      worker.acknowledge(chunk)
+    end
+
+    assert_equal 1, chunks.size
+    chunk = chunks.first
+    assert chunk.chunk?, "Expected a chunk"
+    assert_equal 'TestSuite:full_suite', chunk.id
+    assert_equal 8000.0, chunk.estimated_duration
+  end
+
+  def test_moving_average_takes_precedence_over_timing_file
+    @redis.flushdb
+    require 'tempfile'
+
+    timing_data = { 'TestSuite#test_1' => 10_000.0 }
+
+    updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
+    updater.update('TestSuite#test_1', 2000.0)
+
+    tests = [MockTest.new('TestSuite#test_1')]
+
+    Tempfile.open(['timing', '.json']) do |file|
+      file.write(JSON.generate(timing_data))
+      file.close
+
+      worker = worker(1, tests: tests, build_id: '201', strategy: :suite_bin_packing,
+                      suite_max_duration: 120_000, timing_fallback_duration: 100.0,
+                      timing_file: file.path)
+
+      chunks = []
+      worker.poll do |chunk|
+        chunks << chunk
+        worker.acknowledge(chunk)
+      end
+
+      assert_equal 1, chunks.size
+      assert_equal 2000.0, chunks.first.estimated_duration
+    end
+  end
+
+  def test_falls_back_to_timing_file_when_no_moving_average
+    @redis.flushdb
+    require 'tempfile'
+
+    timing_data = { 'TestSuite#test_1' => 7000.0 }
+    tests = [MockTest.new('TestSuite#test_1')]
+
+    Tempfile.open(['timing', '.json']) do |file|
+      file.write(JSON.generate(timing_data))
+      file.close
+
+      worker = worker(1, tests: tests, build_id: '202', strategy: :suite_bin_packing,
+                      suite_max_duration: 120_000, timing_fallback_duration: 100.0,
+                      timing_file: file.path)
+
+      chunks = []
+      worker.poll do |chunk|
+        chunks << chunk
+        worker.acknowledge(chunk)
+      end
+
+      assert_equal 1, chunks.size
+      assert_equal 7000.0, chunks.first.estimated_duration
+    end
+  end
+
+  def test_falls_back_to_default_when_no_moving_average_or_timing_data
+    @redis.flushdb
+
+    tests = [MockTest.new('UnknownTest#test_1')]
+
+    worker = worker(1, tests: tests, build_id: '203', strategy: :suite_bin_packing,
+                    suite_max_duration: 120_000, timing_fallback_duration: 500.0)
+
+    chunks = []
+    worker.poll do |chunk|
+      chunks << chunk
+      worker.acknowledge(chunk)
+    end
+
+    assert_equal 1, chunks.size
+    assert_equal 500.0, chunks.first.estimated_duration
+  end
+
+  def test_mixed_duration_sources_in_suite_splitting
+    @redis.flushdb
+    require 'tempfile'
+
+    updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
+    updater.update('MixedTest#test_1', 60_000.0)
+    updater.update('MixedTest#test_2', 50_000.0)
+
+    timing_data = {
+      'MixedTest#test_3' => 40_000.0,
+      'MixedTest#test_4' => 30_000.0
+    }
+
+    tests = [
+      MockTest.new('MixedTest#test_1'),
+      MockTest.new('MixedTest#test_2'),
+      MockTest.new('MixedTest#test_3'),
+      MockTest.new('MixedTest#test_4')
+    ]
+
+    Tempfile.open(['timing', '.json']) do |file|
+      file.write(JSON.generate(timing_data))
+      file.close
+
+      worker = worker(1, tests: tests, build_id: '204', strategy: :suite_bin_packing,
+                      suite_max_duration: 120_000, suite_buffer_percent: 10,
+                      timing_fallback_duration: 100.0, timing_file: file.path)
+
+      chunks = []
+      worker.poll do |chunk|
+        chunks << chunk
+        worker.acknowledge(chunk)
+      end
+
+      assert chunks.size >= 2
+
+      effective_max = 120_000 * (1 - 10 / 100.0)
+      chunks.each do |chunk|
+        assert chunk.estimated_duration <= effective_max,
+          "Chunk duration #{chunk.estimated_duration} exceeds effective max #{effective_max}"
+      end
+    end
+  end
+
+  def test_moving_average_ordering_by_duration
+    @redis.flushdb
+
+    updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
+    updater.update('FastTest#test_1', 1000.0)
+    updater.update('SlowTest#test_1', 10_000.0)
+    updater.update('MediumTest#test_1', 5000.0)
+
+    tests = [
+      MockTest.new('FastTest#test_1'),
+      MockTest.new('SlowTest#test_1'),
+      MockTest.new('MediumTest#test_1')
+    ]
+
+    worker = worker(1, tests: tests, build_id: '205', strategy: :suite_bin_packing,
+                    suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+
+    chunks = []
+    worker.poll do |chunk|
+      chunks << chunk
+      worker.acknowledge(chunk)
+    end
+
+    # Should be ordered by duration descending: SlowTest, MediumTest, FastTest
+    assert_equal 3, chunks.size
+    assert_equal 'SlowTest:full_suite', chunks[0].id
+    assert_equal 10_000.0, chunks[0].estimated_duration
+    assert_equal 'MediumTest:full_suite', chunks[1].id
+    assert_equal 5000.0, chunks[1].estimated_duration
+    assert_equal 'FastTest:full_suite', chunks[2].id
+    assert_equal 1000.0, chunks[2].estimated_duration
+  end
+
+  def test_moving_average_with_partial_coverage
+    @redis.flushdb
+
+    # Only one test has moving average data
+    updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
+    updater.update('PartialTest#test_1', 3000.0)
+
+    tests = [
+      MockTest.new('PartialTest#test_1'),
+      MockTest.new('PartialTest#test_2'),
+      MockTest.new('PartialTest#test_3')
+    ]
+
+    worker = worker(1, tests: tests, build_id: '206', strategy: :suite_bin_packing,
+                    suite_max_duration: 120_000, timing_fallback_duration: 500.0)
+
+    chunks = []
+    worker.poll do |chunk|
+      chunks << chunk
+      worker.acknowledge(chunk)
+    end
+
+    assert_equal 1, chunks.size
+    assert_equal 4000.0, chunks.first.estimated_duration
+  end
+
+  def test_moving_average_updates_persist_across_workers
+    @redis.flushdb
+
+    # Manually update moving average as if a previous worker completed the test
+    updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
+    updater.update('PersistTest#test_1', 5500.0)
+
+    # New worker should see the persisted moving average
+    tests = [MockTest.new('PersistTest#test_1')]
+    worker1 = worker(1, tests: tests, build_id: '207', strategy: :suite_bin_packing,
+                     suite_max_duration: 120_000, timing_fallback_duration: 1000.0)
+
+    chunks = []
+    worker1.poll do |chunk|
+      chunks << chunk
+      worker1.acknowledge(chunk)
+    end
+
+    # Should use the persisted moving average value
+    assert_equal 1, chunks.size
+    assert_equal 5500.0, chunks.first.estimated_duration
+  end
+
   private
 
   class MockTest
@@ -451,7 +683,7 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def shuffled_test_list
-    CI::Queue.shuffle(TEST_LIST, Random.new(0)).freeze
+    TEST_LIST.sort.shuffle(random: Random.new(0)).freeze
   end
 
   def build_queue

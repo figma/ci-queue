@@ -36,6 +36,28 @@ module CI
       rescue *self::class::CONNECTION_ERRORS => err
         handler.call(err)
       end
+
+      def ordering_strategy
+        case config.strategy.to_sym
+        when :timing_based
+          Strategy::TimingBased.new(config)
+        when :suite_bin_packing
+          # pass redis if available
+          # need to think about a better way to structure queue/strategy interaction
+          redis_instance = if self.respond_to?(:redis, true) # include private methods
+            self.send(:redis)
+          else
+            nil
+          end
+          Strategy::SuiteBinPacking.new(config, redis: redis_instance)
+        else
+          Strategy::Random.new(config)
+        end
+      end
+
+      def reorder_tests(tests, random: Random.new)
+        ordering_strategy.order_tests(tests, random: random)
+      end
     end
   end
 end

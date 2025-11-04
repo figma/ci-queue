@@ -42,15 +42,6 @@ module CI
       requeueable.nil? || requeueable.call(test_result)
     end
 
-    def shuffle(tests, random, config: nil)
-      if shuffler
-        shuffler.call(tests, random)
-      else
-        strategy = get_strategy(config&.strategy)
-        strategy.order_tests(tests, random: random, config: config)
-      end
-    end
-
     def from_uri(url, config)
       uri = URI(url)
       implementation = case uri.scheme
@@ -65,19 +56,6 @@ module CI
         raise ArgumentError, "Don't know how to handle #{uri.scheme} URLs"
       end
       implementation.from_uri(uri, config)
-    end
-
-    private
-
-    def get_strategy(strategy_name)
-      case strategy_name&.to_sym
-      when :timing_based
-        Strategy::TimingBased.new
-      when :suite_bin_packing
-        Strategy::SuiteBinPacking.new
-      else
-        Strategy::Random.new
-      end
     end
   end
 end
