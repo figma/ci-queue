@@ -4,27 +4,6 @@ module CI
   module Queue
     module Redis
       class UpdateTestDurationMovingAverage
-        LUA_SCRIPT_BATCH = <<~LUA
-          local hash_key = KEYS[1]
-          local smoothing = tonumber(ARGV[1])
-
-          for i = 2, #ARGV, 2 do
-            local test_id = ARGV[i]
-            local new_duration = tonumber(ARGV[i+1])
-            local current_avg = redis.call('HGET', hash_key, test_id)
-
-            if current_avg then
-              current_avg = tonumber(current_avg)
-              local new_avg = smoothing * new_duration + (1 - smoothing) * current_avg
-              redis.call('HSET', hash_key, test_id, new_avg)
-            else
-              redis.call('HSET', hash_key, test_id, new_duration)
-            end
-          end
-
-          return 'OK'
-        LUA
-
         def initialize(redis, key: "test_duration_moving_averages", smoothing_factor: 0.2)
           @redis = redis
           @key = key
@@ -33,8 +12,24 @@ module CI
 
         def update_batch(pairs)
           return 0 if pairs.nil? || pairs.empty?
-          argv = [@smoothing_factor] + pairs.flat_map { |test_id, duration| [test_id, duration] }
-          @redis.eval(LUA_SCRIPT_BATCH, keys: [@key], argv: argv)
+
+          test_ids = pairs.map(&:first)
+          current_values = @redis.hmget(@key, *test_ids)
+
+          writes = []
+          pairs.each_with_index do |(test_id, duration), idx|
+            current = current_values[idx]
+            new_avg = if current
+              @smoothing_factor * duration + (1 - @smoothing_factor) * current.to_f
+            else
+              duration
+            end
+            writes << [test_id, new_avg]
+          end
+
+          @redis.mapped_hmset(@key, writes.to_h) unless writes.empty?
+
+          writes.size
         end
       end
     end
