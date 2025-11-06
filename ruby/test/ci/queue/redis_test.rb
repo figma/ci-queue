@@ -436,8 +436,7 @@ class CI::Queue::RedisTest < Minitest::Test
     @redis.flushdb
 
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update('TestSuite#test_1', 5000.0)
-    updater.update('TestSuite#test_2', 3000.0)
+    updater.update_batch([["TestSuite#test_1", 5000.0], ["TestSuite#test_2", 3000.0]])
 
     tests = [
       MockTest.new('TestSuite#test_1'),
@@ -467,7 +466,7 @@ class CI::Queue::RedisTest < Minitest::Test
     timing_data = { 'TestSuite#test_1' => 10_000.0 }
 
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update('TestSuite#test_1', 2000.0)
+    updater.update_batch([["TestSuite#test_1", 2000.0]])
 
     tests = [MockTest.new('TestSuite#test_1')]
 
@@ -539,8 +538,7 @@ class CI::Queue::RedisTest < Minitest::Test
     require 'tempfile'
 
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update('MixedTest#test_1', 60_000.0)
-    updater.update('MixedTest#test_2', 50_000.0)
+    updater.update_batch([["MixedTest#test_1", 60_000.0], ["MixedTest#test_2", 50_000.0]])
 
     timing_data = {
       'MixedTest#test_3' => 40_000.0,
@@ -582,9 +580,7 @@ class CI::Queue::RedisTest < Minitest::Test
     @redis.flushdb
 
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update('FastTest#test_1', 1000.0)
-    updater.update('SlowTest#test_1', 10_000.0)
-    updater.update('MediumTest#test_1', 5000.0)
+    updater.update_batch([["FastTest#test_1", 1000.0], ["SlowTest#test_1", 10_000.0], ["MediumTest#test_1", 5000.0]])
 
     tests = [
       MockTest.new('FastTest#test_1'),
@@ -616,7 +612,7 @@ class CI::Queue::RedisTest < Minitest::Test
 
     # Only one test has moving average data
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update('PartialTest#test_1', 3000.0)
+    updater.update_batch([["PartialTest#test_1", 3000.0]])
 
     tests = [
       MockTest.new('PartialTest#test_1'),
@@ -642,7 +638,7 @@ class CI::Queue::RedisTest < Minitest::Test
 
     # Manually update moving average as if a previous worker completed the test
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update('PersistTest#test_1', 5500.0)
+    updater.update_batch([["PersistTest#test_1", 5500.0]])
 
     # New worker should see the persisted moving average
     tests = [MockTest.new('PersistTest#test_1')]

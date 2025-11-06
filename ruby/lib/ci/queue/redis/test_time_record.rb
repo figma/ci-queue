@@ -3,6 +3,12 @@ module CI
   module Queue
     module Redis
       class TestTimeRecord < Worker
+        def initialize(redis, config)
+          super
+          @ema_buffer = []
+          @ema_batch_size = 100
+        end
+
         def record(test_name, duration)
           record_test_time(test_name, duration)
           record_test_duration_moving_average(test_name, duration)
@@ -18,7 +24,7 @@ module CI
 
         private
 
-        attr_reader :redis
+        attr_reader :redis, :ema_batch_size
 
         def record_test_time(test_name, duration)
           redis.pipelined do |pipeline|
@@ -32,7 +38,21 @@ module CI
         end
 
         def record_test_duration_moving_average(test_name, duration)
-          UpdateTestDurationMovingAverage.new(redis).update(test_name, duration)
+          return if !should_update_moving_average?
+          @ema_buffer << [test_name, duration]
+          flush_ema_buffer if @ema_buffer.size >= ema_batch_size
+        end
+
+        def flush_ema_buffer
+          return nil if @ema_buffer.empty?
+          UpdateTestDurationMovingAverage.new(redis).update_batch(@ema_buffer)
+          @ema_buffer.clear
+          nil
+        end
+
+        def should_update_moving_average?
+          current_branch = config.respond_to?(:branch) ? config.branch : nil
+          current_branch.to_s == 'master'
         end
 
         def record_test_name(test_name)

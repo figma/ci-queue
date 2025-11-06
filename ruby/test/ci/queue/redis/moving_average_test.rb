@@ -23,11 +23,11 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key, smoothing_factor: 0.5)
     reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
 
-    updater.update('test1', 100.0)
+    updater.update_batch([["test1", 100.0]])
     first_avg = reader['test1']
     assert_equal 100.0, first_avg
 
-    updater.update('test1', 200.0)
+    updater.update_batch([["test1", 200.0]])
     second_avg = reader['test1']
     assert_in_delta 150.0, second_avg, 0.001
   end
@@ -36,41 +36,39 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key)
     reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
 
-    result = updater.update('test1', 10.5)
-
+    updater.update_batch([["test1", 10.5]])
+    result = reader['test1']
     assert_equal 10.5, result
     assert_equal 1, reader.size
   end
 
   def test_update_calculates_exponential_moving_average
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key, smoothing_factor: 0.2)
+    reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
 
-    first_avg = updater.update('test1', 100.0)
-    assert_equal 100.0, first_avg
+    updater.update_batch([["test1", 100.0]])
+    assert_equal 100.0, reader['test1']
 
     # EMA = 0.2 * 150 + 0.8 * 100 = 30 + 80 = 110
-    second_avg = updater.update('test1', 150.0)
-    assert_in_delta 110.0, second_avg, 0.001
+    updater.update_batch([["test1", 150.0]])
+    assert_in_delta 110.0, reader['test1'], 0.001
 
-    third_avg = updater.update('test1', 200.0)
-    assert_in_delta 128.0, third_avg, 0.001
+    updater.update_batch([["test1", 200.0]])
+    assert_in_delta 128.0, reader['test1'], 0.001
   end
 
   def test_update_multiple_tests
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key)
     reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
 
-    updater.update('test1', 10.0)
-    updater.update('test2', 20.0)
-    updater.update('test3', 30.0)
+    updater.update_batch([["test1", 10.0], ["test2", 20.0], ["test3", 30.0]])
 
     assert_equal 3, reader.size
   end
 
   def test_bracket_operator_loads_and_returns_value
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key)
-    updater.update('test1', 10.5)
-    updater.update('test2', 20.5)
+    updater.update_batch([["test1", 10.5], ["test2", 20.5]])
 
     reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
     assert_equal 10.5, reader['test1']
@@ -81,16 +79,14 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key)
     reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
 
-    updater.update('test1', 10.5)
+    updater.update_batch([["test1", 10.5]])
 
     assert_nil reader['nonexistent']
   end
 
   def test_load_all_loads_all_values_from_redis
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key)
-    updater.update('test1', 10.0)
-    updater.update('test2', 20.0)
-    updater.update('test3', 30.0)
+    updater.update_batch([["test1", 10.0], ["test2", 20.0], ["test3", 30.0]])
 
     reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
     reader.load_all
@@ -104,7 +100,7 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key)
 
     1500.times do |i|
-      updater.update("test_#{i}", i.to_f)
+      updater.update_batch([["test_#{i}", i.to_f]])
     end
 
     # Create new instance and load all
@@ -123,20 +119,19 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
 
     assert_equal 0, reader.size
 
-    updater.update('test1', 10.0)
+    updater.update_batch([["test1", 10.0]])
     assert_equal 1, reader.size
 
-    updater.update('test2', 20.0)
+    updater.update_batch([["test2", 20.0]])
     assert_equal 2, reader.size
 
-    updater.update('test1', 15.0)
+    updater.update_batch([["test1", 15.0]])
     assert_equal 2, reader.size
   end
 
   def test_updates_persist_to_redis
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key)
-    updater.update('test1', 10.5)
-    updater.update('test2', 20.5)
+    updater.update_batch([["test1", 10.5], ["test2", 20.5]])
 
     # Verify data is actually in Redis
     values = @redis.hgetall(@key)
@@ -150,8 +145,8 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
     updater2 = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key, smoothing_factor: 0.2)
     reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
 
-    updater1.update('test1', 100.0)
-    updater2.update('test1', 200.0)
+    updater1.update_batch([["test1", 100.0]])
+    updater2.update_batch([["test1", 200.0]])
 
     # Expected: 0.2 * 200 + 0.8 * 100 = 120
     assert_in_delta 120.0, reader['test1'], 0.001
@@ -161,9 +156,7 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis, key: @key)
 
     # Test with various floating point values
-    updater.update('test1', 0.123456789)
-    updater.update('test2', 999.999999)
-    updater.update('test3', 0.000001)
+    updater.update_batch([["test1", 0.123456789], ["test2", 999.999999], ["test3", 0.000001]])
 
     # Load in new instance
     reader = CI::Queue::Redis::TestDurationMovingAverages.new(@redis, key: @key)
