@@ -51,6 +51,7 @@ module CI
         end
 
         def should_update_moving_average?
+          return false unless config.write_duration_averages
           current_branch = config.respond_to?(:branch) ? config.branch : nil
           current_branch.to_s == 'master'
         end

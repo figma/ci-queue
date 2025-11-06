@@ -11,6 +11,7 @@ module CI
       attr_accessor :strategy, :timing_file, :timing_fallback_duration, :export_timing_file
       attr_accessor :suite_max_duration, :suite_buffer_percent
       attr_accessor :branch
+      attr_accessor :write_duration_averages
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
       attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
@@ -91,6 +92,7 @@ module CI
         @suite_max_duration = suite_max_duration
         @suite_buffer_percent = suite_buffer_percent
         @branch = branch
+        @write_duration_averages = false
       end
 
       def queue_init_timeout
