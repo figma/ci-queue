@@ -458,6 +458,7 @@ module Integration
             '--worker', '1',
             '--timeout', '10',
             '-Itest',
+            '--record-duration-averages=true',
             'test/time_test.rb',
             chdir: 'test/fixtures/',
           )
