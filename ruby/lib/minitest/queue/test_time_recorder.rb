@@ -13,6 +13,10 @@ module Minitest
         test_id = "#{test.klass}##{test.name}"
         @build.record(test_id, test_duration_in_milliseconds)
       end
+
+      def report
+        @build.flush_ema_buffer if @build.respond_to?(:flush_ema_buffer)
+      end
     end
   end
 end
