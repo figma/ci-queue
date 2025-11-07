@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+require 'redis'
 module CI
   module Queue
     module Common
@@ -42,14 +43,20 @@ module CI
         when :timing_based
           Strategy::TimingBased.new(config)
         when :suite_bin_packing
-          # pass redis if available
-          # need to think about a better way to structure queue/strategy interaction
-          redis_instance = if self.respond_to?(:redis, true) # include private methods
-            self.send(:redis)
+          # Use dedicated timing redis if provided via CLI flag (stored in config).
+          # Do NOT fall back to the default queue redis for timing reads.
+          timing_url = if config.respond_to?(:timing_redis_url)
+            config.timing_redis_url
           else
             nil
           end
-          Strategy::SuiteBinPacking.new(config, redis: redis_instance)
+          timing_redis = if timing_url && !timing_url.empty?
+            ::Redis.new(url: timing_url)
+          else
+            nil
+          end
+
+          Strategy::SuiteBinPacking.new(config, redis: timing_redis)
         else
           Strategy::Random.new(config)
         end

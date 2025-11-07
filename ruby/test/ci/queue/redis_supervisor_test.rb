@@ -66,6 +66,7 @@ class CI::Queue::Redis::SupervisorTest < Minitest::Test
         build_id: '42',
         worker_id: id.to_s,
         timeout: 0.2,
+        timing_redis_url: @redis_url,
       ),
     ).populate(SharedQueueAssertions::TEST_LIST)
   end
@@ -76,7 +77,8 @@ class CI::Queue::Redis::SupervisorTest < Minitest::Test
       CI::Queue::Configuration.new(
         build_id: '42',
         timeout: timeout,
-        queue_init_timeout: queue_init_timeout
+        queue_init_timeout: queue_init_timeout,
+        timing_redis_url: @redis_url,
       ),
     )
   end

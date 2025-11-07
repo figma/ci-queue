@@ -13,7 +13,8 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       timeout: 30, # 30 seconds default timeout
       strategy: :suite_bin_packing,
       suite_max_duration: 120_000,
-      timing_fallback_duration: 100.0
+      timing_fallback_duration: 100.0,
+      timing_redis_url: @redis_url
     )
 
     @worker = CI::Queue::Redis.new(@redis_url, @config)
