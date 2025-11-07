@@ -643,6 +643,19 @@ module Minitest
             queue_config.suite_buffer_percent = percent
           end
 
+          help = <<~EOS
+            Enable or disable writing duration averages back to Redis after the run (default: false)
+          EOS
+          opts.separator ""
+          opts.on('--record-duration-averages[=BOOL]', help) do |v|
+            case v
+            when nil
+              queue_config.write_duration_averages = false
+            else
+              queue_config.write_duration_averages = v =~ /^(true|t|yes|y|1)$/i
+            end
+          end
+
           opts.separator ""
           opts.separator "    retry: Replays a previous run in the same order."
 
