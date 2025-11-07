@@ -11,6 +11,7 @@ module CI
       attr_accessor :strategy, :timing_file, :timing_fallback_duration, :export_timing_file
       attr_accessor :suite_max_duration, :suite_buffer_percent
       attr_accessor :branch
+      attr_accessor :timing_redis_url
       attr_accessor :write_duration_averages
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
@@ -59,7 +60,8 @@ module CI
         export_flaky_tests_file: nil, known_flaky_tests: [],
         strategy: :random, timing_file: nil, timing_fallback_duration: 100.0, export_timing_file: nil,
         suite_max_duration: 120_000, suite_buffer_percent: 10,
-        branch: nil
+        branch: nil,
+        timing_redis_url: nil
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
@@ -92,6 +94,7 @@ module CI
         @suite_max_duration = suite_max_duration
         @suite_buffer_percent = suite_buffer_percent
         @branch = branch
+        @timing_redis_url = timing_redis_url
         @write_duration_averages = false
       end
 

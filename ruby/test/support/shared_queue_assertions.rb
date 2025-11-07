@@ -91,6 +91,7 @@ module SharedQueueAssertions
       max_requeues: 1,
       requeue_tolerance: 0.1,
       max_consecutive_failures: 10,
+      timing_redis_url: ENV.fetch('REDIS_URL', 'redis://localhost:6379/0'),
     )
   end
 

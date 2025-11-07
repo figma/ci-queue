@@ -57,6 +57,7 @@ module Minitest::Queue
           build_id: '42',
           worker_id: id.to_s,
           timeout: 0.2,
+          timing_redis_url: @redis_url,
         ),
       ).populate([])
     end

@@ -75,7 +75,7 @@ module Minitest
           OrderReporter.new(path: 'log/test_order.log'),
         ]
         if queue_config.track_test_duration
-          test_time_record = CI::Queue::Redis::TestTimeRecord.new(queue_url, queue_config)
+          test_time_record = CI::Queue::Redis::TestTimeRecord.new(timing_url, queue_config)
           reporters << TestTimeRecorder.new(build: test_time_record)
         end
         if queue_config.statsd_endpoint
@@ -118,7 +118,7 @@ module Minitest
         ]
 
         if queue_config.track_test_duration
-          test_time_record = CI::Queue::Redis::TestTimeRecord.new(queue_url, queue_config)
+          test_time_record = CI::Queue::Redis::TestTimeRecord.new(timing_url, queue_config)
           reporters << TestTimeRecorder.new(build: test_time_record)
         end
 
@@ -226,7 +226,7 @@ module Minitest
 
         # Handle timing data reporting and export
         test_time_reporter_success = if queue_config.track_test_duration
-          test_time_record = CI::Queue::Redis::TestTimeRecord.new(queue_url, queue_config)
+          test_time_record = CI::Queue::Redis::TestTimeRecord.new(timing_url, queue_config)
           test_time_reporter = TestTimeReporter.new(
             build: test_time_record,
             limit: queue_config.max_test_duration,
@@ -266,7 +266,7 @@ module Minitest
         grind_reporter.report
 
         test_time_reporter_success = if queue_config.track_test_duration
-          test_time_record = CI::Queue::Redis::TestTimeRecord.new(queue_url, queue_config)
+          test_time_record = CI::Queue::Redis::TestTimeRecord.new(timing_url, queue_config)
           test_time_reporter = Minitest::Queue::TestTimeReporter.new(
             build: test_time_record,
             limit: queue_config.max_test_duration,
@@ -286,7 +286,7 @@ module Minitest
       private
 
       attr_reader :queue_config, :options, :command, :argv
-      attr_accessor :queue, :queue_url, :grind_list, :grind_count, :load_paths, :test_globs
+      attr_accessor :queue, :queue_url, :timing_redis_url, :grind_list, :grind_count, :load_paths, :test_globs
 
       def require_worker_id!
         if queue.distributed?
@@ -378,6 +378,16 @@ module Minitest
           opts.separator ""
           opts.on('--queue URL', help) do |url|
             self.queue_url = url
+          end
+
+          help = <<~EOS
+            URL of the Redis instance used for timing data (moving averages).
+            Defaults to $CI_QUEUE_TIMING_URL if set; otherwise falls back to --queue URL.
+          EOS
+          opts.separator ""
+          opts.on('--timing-redis URL', help) do |url|
+            self.timing_redis_url = url
+            queue_config.timing_redis_url = url
           end
 
           help = <<~EOS
@@ -684,6 +694,10 @@ module Minitest
 
       def queue_url
         @queue_url || ENV['CI_QUEUE_URL']
+      end
+
+      def timing_url
+        @timing_redis_url || ENV['CI_QUEUE_TIMING_URL'] 
       end
 
       def invalid_usage!(message)
