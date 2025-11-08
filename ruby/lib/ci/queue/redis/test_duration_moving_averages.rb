@@ -31,6 +31,7 @@ module CI
             end
             break if cursor == '0'
           end
+          @loaded = true
         end
 
         def size

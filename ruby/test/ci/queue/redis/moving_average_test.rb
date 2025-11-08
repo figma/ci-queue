@@ -28,6 +28,7 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
     assert_equal 100.0, first_avg
 
     updater.update_batch([["test1", 200.0]])
+    reader.load_all
     second_avg = reader['test1']
     assert_in_delta 150.0, second_avg, 0.001
   end
@@ -51,9 +52,11 @@ class CI::Queue::Redis::MovingAverageTest < Minitest::Test
 
     # EMA = 0.2 * 150 + 0.8 * 100 = 30 + 80 = 110
     updater.update_batch([["test1", 150.0]])
+    reader.load_all
     assert_in_delta 110.0, reader['test1'], 0.001
 
     updater.update_batch([["test1", 200.0]])
+    reader.load_all
     assert_in_delta 128.0, reader['test1'], 0.001
   end
 
