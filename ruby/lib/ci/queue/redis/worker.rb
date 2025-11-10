@@ -32,6 +32,8 @@ module CI
           # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
 
+          @total = tests.size
+
           # After populating the index, "register" the worker with the build
           register
 
@@ -261,8 +263,6 @@ module CI
 
         def push(tests)
           return unless master?
-
-          @total = tests.size
 
           if redis.setnx(key('master-status'), 'setup')
             redis.multi do |transaction|
