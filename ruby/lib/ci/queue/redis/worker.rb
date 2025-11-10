@@ -32,6 +32,9 @@ module CI
           # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
 
+          # After populating the index, "register" the worker with the build
+          register
+
           # Only the master worker reorders tests and pushes them to the queue
           return self unless master?
 
@@ -257,7 +260,6 @@ module CI
         end
 
         def push(tests)
-          register
           return unless master?
 
           @total = tests.size
