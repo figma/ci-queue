@@ -23,7 +23,7 @@ class CI::Queue::Redis::SupervisorTest < Minitest::Test
       master_found = @supervisor.wait_for_master
     end
     thread.wakeup
-    worker(1)
+    worker(0)
     thread.join
     assert_equal true, master_found
   end
@@ -34,7 +34,7 @@ class CI::Queue::Redis::SupervisorTest < Minitest::Test
       workers_done = @supervisor.wait_for_workers
     end
     thread.wakeup
-    poll(worker(1))
+    poll(worker(0))
     thread.join
     assert_equal true, workers_done
   end
@@ -46,14 +46,14 @@ class CI::Queue::Redis::SupervisorTest < Minitest::Test
       io = capture_io { @supervisor.wait_for_workers }
     end
     thread.wakeup
-    worker(1)
+    worker(0)
     thread.join
     assert_includes io, "Aborting, it seems all workers died.\n"
   end
 
   def test_num_workers
     assert_equal 0, @supervisor.workers_count
-    worker(1)
+    worker(0)
     assert_equal 1, @supervisor.workers_count
   end
 

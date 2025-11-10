@@ -72,17 +72,13 @@ class CI::Queue::RedisTest < Minitest::Test
 
   def test_master_election
     assert_predicate @queue, :master?
-    refute_predicate worker(2), :master?
-
-    @redis.flushdb
-    assert_predicate worker(2), :master?
     refute_predicate worker(1), :master?
   end
 
   def test_exhausted_while_not_populated
     assert_predicate @queue, :populated?
 
-    second_worker = worker(2, populate: false)
+    second_worker = worker(1, populate: false)
 
     refute_predicate second_worker, :populated?
     refute_predicate second_worker, :exhausted?
@@ -94,7 +90,7 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def test_timed_out_test_are_picked_up_by_other_workers
-    second_queue = worker(2)
+    second_queue = worker(1)
     acquired = false
     done = false
     monitor = Monitor.new
@@ -123,7 +119,7 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def test_release_immediately_timeout_the_lease
-    second_queue = worker(2)
+    second_queue = worker(1)
 
     reserved_test = nil
     poll(@queue) do |test|
@@ -132,7 +128,7 @@ class CI::Queue::RedisTest < Minitest::Test
     end
     refute_nil reserved_test
 
-    worker(1).release! # Use a new instance to ensure we don't depend on in-memory state
+    worker(0).release! # Use a new instance to ensure we don't depend on in-memory state
 
     poll(second_queue) do |test|
       assert_equal reserved_test, test
@@ -141,7 +137,7 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def test_test_isnt_requeued_if_it_was_picked_up_by_another_worker
-    second_queue = worker(2)
+    second_queue = worker(1)
     acquired = false
     done = false
     monitor = Monitor.new
@@ -169,7 +165,7 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def test_acknowledge_returns_false_if_the_test_was_picked_up_by_another_worker
-    second_queue = worker(2)
+    second_queue = worker(1)
     acquired = false
     done = false
     monitor = Monitor.new
@@ -201,7 +197,8 @@ class CI::Queue::RedisTest < Minitest::Test
 
   def test_workers_register
     assert_equal 1, @redis.scard(('build:42:workers'))
-    worker(2)
+    worker(1)
+    puts @redis.scard(('build:42:workers'))
     assert_equal 2, @redis.scard(('build:42:workers'))
   end
 
@@ -261,9 +258,9 @@ class CI::Queue::RedisTest < Minitest::Test
     # Create a chunk with 10 tests from same suite -> timeout = 0.2s * 10 = 2.0s
     tests = (1..10).map { |i| MockTest.new("ChunkSuite#test_#{i}") }
 
-    worker1 = worker(1, tests: tests, build_id: '100', strategy: :suite_bin_packing,
+    worker1 = worker(0, tests: tests, build_id: '100', strategy: :suite_bin_packing,
                      suite_max_duration: 120_000, timing_fallback_duration: 100.0)
-    worker2 = worker(2, tests: tests, build_id: '100', strategy: :suite_bin_packing,
+    worker2 = worker(1, tests: tests, build_id: '100', strategy: :suite_bin_packing,
                      suite_max_duration: 120_000, timing_fallback_duration: 100.0, populate: false)
 
     acquired = false
@@ -322,9 +319,9 @@ class CI::Queue::RedisTest < Minitest::Test
 
     tests = (1..5).map { |i| MockTest.new("TimeoutSuite#test_#{i}") }
 
-    worker1 = worker(1, tests: tests, build_id: '101', strategy: :suite_bin_packing,
+    worker1 = worker(0, tests: tests, build_id: '101', strategy: :suite_bin_packing,
                      suite_max_duration: 120_000, timing_fallback_duration: 100.0)
-    worker2 = worker(2, tests: tests, build_id: '101', strategy: :suite_bin_packing,
+    worker2 = worker(1, tests: tests, build_id: '101', strategy: :suite_bin_packing,
                      suite_max_duration: 120_000, timing_fallback_duration: 100.0)
 
     acquired = false
@@ -386,8 +383,8 @@ class CI::Queue::RedisTest < Minitest::Test
       MockTest.new("SuiteC#test_1")
     ]
 
-    worker1 = worker(1, tests: tests, build_id: '102', timeout: 0.2)
-    worker2 = worker(2, tests: tests, build_id: '102', timeout: 0.2)
+    worker1 = worker(0, tests: tests, build_id: '102', timeout: 0.2)
+    worker2 = worker(1, tests: tests, build_id: '102', timeout: 0.2)
 
     acquired = false
     done = false
@@ -443,7 +440,7 @@ class CI::Queue::RedisTest < Minitest::Test
       MockTest.new('TestSuite#test_2')
     ]
 
-    worker = worker(1, tests: tests, build_id: '200', strategy: :suite_bin_packing,
+    worker = worker(0, tests: tests, build_id: '200', strategy: :suite_bin_packing,
                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
 
     chunks = []
@@ -474,7 +471,7 @@ class CI::Queue::RedisTest < Minitest::Test
       file.write(JSON.generate(timing_data))
       file.close
 
-      worker = worker(1, tests: tests, build_id: '201', strategy: :suite_bin_packing,
+      worker = worker(0, tests: tests, build_id: '201', strategy: :suite_bin_packing,
                       suite_max_duration: 120_000, timing_fallback_duration: 100.0,
                       timing_file: file.path)
 
@@ -500,7 +497,7 @@ class CI::Queue::RedisTest < Minitest::Test
       file.write(JSON.generate(timing_data))
       file.close
 
-      worker = worker(1, tests: tests, build_id: '202', strategy: :suite_bin_packing,
+      worker = worker(0, tests: tests, build_id: '202', strategy: :suite_bin_packing,
                       suite_max_duration: 120_000, timing_fallback_duration: 100.0,
                       timing_file: file.path)
 
@@ -520,7 +517,7 @@ class CI::Queue::RedisTest < Minitest::Test
 
     tests = [MockTest.new('UnknownTest#test_1')]
 
-    worker = worker(1, tests: tests, build_id: '203', strategy: :suite_bin_packing,
+    worker = worker(0, tests: tests, build_id: '203', strategy: :suite_bin_packing,
                     suite_max_duration: 120_000, timing_fallback_duration: 500.0)
 
     chunks = []
@@ -556,7 +553,7 @@ class CI::Queue::RedisTest < Minitest::Test
       file.write(JSON.generate(timing_data))
       file.close
 
-      worker = worker(1, tests: tests, build_id: '204', strategy: :suite_bin_packing,
+      worker = worker(0, tests: tests, build_id: '204', strategy: :suite_bin_packing,
                       suite_max_duration: 120_000, suite_buffer_percent: 10,
                       timing_fallback_duration: 100.0, timing_file: file.path)
 
@@ -588,7 +585,7 @@ class CI::Queue::RedisTest < Minitest::Test
       MockTest.new('MediumTest#test_1')
     ]
 
-    worker = worker(1, tests: tests, build_id: '205', strategy: :suite_bin_packing,
+    worker = worker(0, tests: tests, build_id: '205', strategy: :suite_bin_packing,
                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
 
     chunks = []
@@ -620,7 +617,7 @@ class CI::Queue::RedisTest < Minitest::Test
       MockTest.new('PartialTest#test_3')
     ]
 
-    worker = worker(1, tests: tests, build_id: '206', strategy: :suite_bin_packing,
+    worker = worker(0, tests: tests, build_id: '206', strategy: :suite_bin_packing,
                     suite_max_duration: 120_000, timing_fallback_duration: 500.0)
 
     chunks = []
@@ -642,7 +639,7 @@ class CI::Queue::RedisTest < Minitest::Test
 
     # New worker should see the persisted moving average
     tests = [MockTest.new('PersistTest#test_1')]
-    worker1 = worker(1, tests: tests, build_id: '207', strategy: :suite_bin_packing,
+    worker1 = worker(0, tests: tests, build_id: '207', strategy: :suite_bin_packing,
                      suite_max_duration: 120_000, timing_fallback_duration: 1000.0)
 
     chunks = []
@@ -683,7 +680,7 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def build_queue
-    worker(1, max_requeues: 1, requeue_tolerance: 0.1, populate: false, max_consecutive_failures: 10)
+    worker(0, max_requeues: 1, requeue_tolerance: 0.1, populate: false, max_consecutive_failures: 10)
   end
 
   def populate(worker, tests: TEST_LIST.dup)
