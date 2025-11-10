@@ -29,14 +29,19 @@ module CI
         end
 
         def populate(tests, random: Random.new)
+          # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
+
+          # Only the master worker reorders tests and pushes them to the queue
+          return self unless master?
+
           executables = reorder_tests(tests, random: random)
 
           # Separate chunks from individual tests
           chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
           individual_tests = executables.select { |e| !e.is_a?(CI::Queue::TestChunk) }
 
-          # Store chunk metadata in Redis (only master does this)
+          # Store chunk metadata in Redis
           store_chunk_metadata(chunks) if chunks.any?
 
           # Push all IDs to queue (chunks + individual tests)
@@ -59,7 +64,7 @@ module CI
         end
 
         def master?
-          @master
+          queue_config.worker_id.to_s == '0'
         end
 
         def idle?
@@ -252,9 +257,12 @@ module CI
         end
 
         def push(tests)
+          register
+          return unless master?
+
           @total = tests.size
 
-          if @master = redis.setnx(key('master-status'), 'setup')
+          if redis.setnx(key('master-status'), 'setup')
             redis.multi do |transaction|
               transaction.lpush(key('queue'), tests) unless tests.empty?
               transaction.set(key('total'), @total)
@@ -265,14 +273,11 @@ module CI
               transaction.expire(key('master-status'), config.redis_ttl)
             end
           end
-          register
-          redis.expire(key('workers'), config.redis_ttl)
-        rescue *CONNECTION_ERRORS
-          raise if @master
         end
 
         def register
           redis.sadd(key('workers'), [worker_id])
+          redis.expire(key('workers'), config.redis_ttl)
         end
 
         private
