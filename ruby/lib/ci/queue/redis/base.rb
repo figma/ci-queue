@@ -52,7 +52,7 @@ module CI
           total - size
         end
 
-        def wait_for_master(timeout: 30)
+        def wait_for_master(timeout: 120)
           return true if master?
           (timeout * 10 + 1).to_i.times do
             if queue_initialized?
