@@ -29,8 +29,8 @@ module CI
         end
 
         def populate(tests, random: Random.new)
-          # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
+<<<<<<< HEAD
 
           @total = tests.size
 
@@ -40,13 +40,15 @@ module CI
           # Only the master worker reorders tests and pushes them to the queue
           return self unless master?
 
+=======
+>>>>>>> parent of aa33ed7 (Merge pull request #62 from figma/ebarajas/only-populate-if-master)
           executables = reorder_tests(tests, random: random)
 
           # Separate chunks from individual tests
           chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
           individual_tests = executables.select { |e| !e.is_a?(CI::Queue::TestChunk) }
 
-          # Store chunk metadata in Redis
+          # Store chunk metadata in Redis (only master does this)
           store_chunk_metadata(chunks) if chunks.any?
 
           # Push all IDs to queue (chunks + individual tests)
@@ -69,7 +71,7 @@ module CI
         end
 
         def master?
-          @config.worker_id.to_s == '0'
+          @master
         end
 
         def idle?
@@ -262,9 +264,15 @@ module CI
         end
 
         def push(tests)
+<<<<<<< HEAD
           return unless master?
 
           if redis.setnx(key('master-status'), 'setup')
+=======
+          @total = tests.size
+
+          if @master = redis.setnx(key('master-status'), 'setup')
+>>>>>>> parent of aa33ed7 (Merge pull request #62 from figma/ebarajas/only-populate-if-master)
             redis.multi do |transaction|
               transaction.lpush(key('queue'), tests) unless tests.empty?
               transaction.set(key('total'), @total)
@@ -275,11 +283,14 @@ module CI
               transaction.expire(key('master-status'), config.redis_ttl)
             end
           end
+          register
+          redis.expire(key('workers'), config.redis_ttl)
+        rescue *CONNECTION_ERRORS
+          raise if @master
         end
 
         def register
           redis.sadd(key('workers'), [worker_id])
-          redis.expire(key('workers'), config.redis_ttl)
         end
 
         private
