@@ -9,7 +9,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
     @config = CI::Queue::Configuration.new(
       build_id: '42',
-      worker_id: '0',
+      worker_id: '1',
       timeout: 0.2,
       strategy: :suite_bin_packing,
       suite_max_duration: 120_000,
