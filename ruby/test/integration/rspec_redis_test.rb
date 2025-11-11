@@ -23,7 +23,7 @@ module Integration
           '--queue', @redis_url,
           '--seed', '123',
           '--build', '1',
-          '--worker', '0',
+          '--worker', '1',
           '--timeout', '1',
           '--max-requeues', '1',
           '--requeue-tolerance', '1',
@@ -78,7 +78,7 @@ module Integration
           '--queue', @redis_url,
           '--seed', '123',
           '--build', '1',
-          '--worker', '0',
+          '--worker', '1',
           '--timeout', '1',
           '--max-requeues', '1',
           '--requeue-tolerance', '1',
@@ -120,7 +120,7 @@ module Integration
           '--queue', @redis_url,
           '--seed', '123',
           '--build', '1',
-          '--worker', '0',
+          '--worker', '1',
           '--timeout', '1',
           '--max-requeues', '1',
           '--requeue-tolerance', '1',
@@ -154,7 +154,7 @@ module Integration
           '--queue', @redis_url,
           '--seed', '123',
           '--build', '1',
-          '--worker', '0',
+          '--worker', '1',
           '--timeout', '1',
           chdir: 'test/fixtures/',
         )
@@ -205,7 +205,7 @@ module Integration
           '--seed', '123',
           '--build', '1',
           '--timeout', '1',
-          '--worker', '0',
+          '--worker', '1',
           chdir: 'test/fixtures/',
         )
       end
@@ -257,7 +257,7 @@ module Integration
           '--queue', @redis_url,
           '--seed', '123',
           '--build', '1',
-          '--worker', '0',
+          '--worker', '1',
           '--timeout', '1',
           '--max-requeues', '1',
           '--requeue-tolerance', '1',
@@ -297,7 +297,7 @@ module Integration
           '--queue', @redis_url,
           '--seed', '123',
           '--build', '1',
-          '--worker', '0',
+          '--worker', '1',
           '--timeout', '1',
           '--max-requeues', '0',
           '--requeue-tolerance', '0',
@@ -365,7 +365,6 @@ module Integration
     end
 
     def test_world_wants_to_quit
-      skip "This test is broken with our changes to worker IDs"
       out, err = capture_subprocess_io do
         system(
           { 'EARLY_EXIT' => '1' },
@@ -373,7 +372,7 @@ module Integration
           '--queue', @redis_url,
           '--seed', '123',
           '--build', '1',
-          '--worker', '0',
+          '--worker', '1',
           '--timeout', '1',
           chdir: 'test/fixtures/early_exit_suite',
         )
