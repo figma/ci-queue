@@ -31,18 +31,21 @@ module CI
         def populate(tests, random: Random.new)
           # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
-          executables = reorder_tests(tests, random: random)
+          @total = tests.size
 
-          # Separate chunks from individual tests
-          chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
-          individual_tests = executables.select { |e| !e.is_a?(CI::Queue::TestChunk) }
+          if acquire_master_role?
+            executables = reorder_tests(tests, random: random)
 
-          # Store chunk metadata in Redis (only master does this)
-          store_chunk_metadata(chunks) if chunks.any?
+            chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
+            individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
 
-          # Push all IDs to queue (chunks + individual tests)
-          all_ids = chunks.map(&:id) + individual_tests.map(&:id)
-          push(all_ids)
+            store_chunk_metadata(chunks) if chunks.any?
+
+            all_ids = chunks.map(&:id) + individual_tests.map(&:id)
+            push(all_ids)
+          end
+
+          register_worker_presence
 
           self
         end
@@ -255,7 +258,7 @@ module CI
         def push(tests)
           @total = tests.size
 
-          if @master = redis.setnx(key('master-status'), 'setup')
+          if @master
             redis.multi do |transaction|
               transaction.lpush(key('queue'), tests) unless tests.empty?
               transaction.set(key('total'), @total)
@@ -266,8 +269,6 @@ module CI
               transaction.expire(key('master-status'), config.redis_ttl)
             end
           end
-          register
-          redis.expire(key('workers'), config.redis_ttl)
         rescue *CONNECTION_ERRORS
           raise if @master
         end
@@ -277,6 +278,22 @@ module CI
         end
 
         private
+
+        def acquire_master_role?
+          return true if @master
+
+          @master = redis.setnx(key('master-status'), 'setup')
+        rescue *CONNECTION_ERRORS
+          @master = nil
+          false
+        end
+
+        def register_worker_presence
+          register
+          redis.expire(key('workers'), config.redis_ttl)
+        rescue *CONNECTION_ERRORS
+          raise if master?
+        end
 
         def store_chunk_metadata(chunks)
           # Batch operations to avoid exceeding Redis multi operation limits
