@@ -9,7 +9,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
 
     @config = CI::Queue::Configuration.new(
       build_id: '42',
-      worker_id: '0',
+      worker_id: '1',
       timeout: 30, # 30 seconds default timeout
       strategy: :suite_bin_packing,
       suite_max_duration: 120_000,
@@ -157,7 +157,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       'build:42:queue',
       'build:42:running',
       'build:42:processed',
-      'build:42:worker:0:queue',
+      'build:42:worker:1:queue',
       'build:42:owners',
       'build:42:test-group-timeout', # 6th key for dynamic deadline
     ]
@@ -185,7 +185,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     expected_keys = [
       'build:42:running',
       'build:42:completed',
-      'build:42:worker:0:queue',
+      'build:42:worker:1:queue',
       'build:42:owners',
       'build:42:test-group-timeout', # 5th key for dynamic deadline
     ]
@@ -208,7 +208,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     # Create worker with short timeout for faster test
     config = CI::Queue::Configuration.new(
       build_id: 'timeout-test',
-      worker_id: '0',
+      worker_id: '1',
       timeout: 0.5, # 0.5 seconds
       strategy: :suite_bin_packing
     )
@@ -243,7 +243,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     # Create worker with short timeout
     config = CI::Queue::Configuration.new(
       build_id: 'single-timeout-test',
-      worker_id: '0',
+      worker_id: '1',
       timeout: 0.5, # 0.5 seconds
     )
 
