@@ -46,7 +46,7 @@ module CI
           chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
           individual_tests = executables.select { |e| !e.is_a?(CI::Queue::TestChunk) }
 
-          # Store chunk metadata in Redis
+          # Store chunk metadata in Redis (only master does this)
           store_chunk_metadata(chunks) if chunks.any?
 
           # Push all IDs to queue (chunks + individual tests)
@@ -69,7 +69,7 @@ module CI
         end
 
         def master?
-          queue_config.worker_id.to_s == '0'
+          @master
         end
 
         def idle?
@@ -275,11 +275,14 @@ module CI
               transaction.expire(key('master-status'), config.redis_ttl)
             end
           end
+          register
+          redis.expire(key('workers'), config.redis_ttl)
+        rescue *CONNECTION_ERRORS
+          raise if @master
         end
 
         def register
           redis.sadd(key('workers'), [worker_id])
-          redis.expire(key('workers'), config.redis_ttl)
         end
 
         private
