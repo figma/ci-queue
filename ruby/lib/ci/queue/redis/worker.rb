@@ -69,7 +69,7 @@ module CI
         end
 
         def master?
-          @config.worker_id.to_s == '0'
+          queue_config.worker_id.to_s == '0'
         end
 
         def idle?
