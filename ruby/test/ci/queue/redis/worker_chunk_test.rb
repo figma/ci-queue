@@ -63,6 +63,31 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     assert_equal test_ids, parsed['test_ids']
   end
 
+  def test_non_master_does_not_reorder_tests
+    tests = create_mock_tests(['TestA#test_1'])
+
+    @worker.stub(:reorder_tests, tests) do
+      @worker.populate(tests)
+    end
+
+    secondary_config = @config.dup
+    secondary_config.instance_variable_set(:@worker_id, '2')
+    secondary_worker = CI::Queue::Redis.new(@redis_url, secondary_config)
+
+    reorder_calls = 0
+    secondary_worker.stub(:reorder_tests, ->(passed_tests, **_) do
+      reorder_calls += 1
+      passed_tests
+    end) do
+      secondary_worker.populate(tests)
+    end
+
+    assert_equal 0, reorder_calls, 'Non-master workers should not reorder tests'
+    refute secondary_worker.master?, 'Secondary worker should not become master'
+    assert_equal @worker.total, secondary_worker.total
+    assert_includes @redis.smembers('build:42:workers'), '2'
+  end
+
   def test_chunk_id_detection
     assert @worker.send(:chunk_id?, 'TestA:full_suite')
     assert @worker.send(:chunk_id?, 'TestB:chunk_0')
