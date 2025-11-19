@@ -325,7 +325,7 @@ module CI
         end
 
         def chunk_id?(id)
-          id.include?(':full_suite') || id.include?(':chunk_')
+          id.include?(':chunk_')
         end
 
         def resolve_executable(id)
@@ -349,11 +349,7 @@ module CI
           chunk = CI::Queue::TestChunk.from_json(chunk_id, chunk_json)
 
           # Resolve test objects based on chunk type
-          test_objects = if chunk.full_suite?
-            resolve_full_suite_tests(chunk.suite_name)
-          else
-            resolve_partial_suite_tests(chunk.test_ids)
-          end
+          test_objects = resolve_suite_tests(chunk.test_ids)
 
           if test_objects.empty?
             warn "Warning: No tests found for chunk #{chunk_id}"
@@ -370,18 +366,7 @@ module CI
           nil
         end
 
-        def resolve_full_suite_tests(suite_name)
-          # Filter index for all tests from this suite
-          # Tests are added to index during populate() with format "SuiteName#test_method"
-          prefix = "#{suite_name}#"
-          tests = index.select { |test_id, _| test_id.start_with?(prefix) }
-                        .values
-
-          # Sort to maintain consistent order (alphabetical by test name)
-          tests.sort_by(&:id)
-        end
-
-        def resolve_partial_suite_tests(test_ids)
+        def resolve_suite_tests(test_ids)
           # Fetch specific tests from index
           test_ids.map { |test_id| index.fetch(test_id) }
         end
