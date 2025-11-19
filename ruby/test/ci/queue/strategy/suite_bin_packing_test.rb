@@ -440,6 +440,126 @@ class SuiteBinPackingTest < Minitest::Test
     assert_equal 1, web_chunks.first.test_count
   end
 
+  def test_dynamic_max_duration_calculation
+    # Set up parallel job count
+    ENV['BUILDKITE_PARALLEL_JOB_COUNT'] = '4'
+    
+    tests = create_mock_tests([
+      'TestSuite#test_1',
+      'TestSuite#test_2',
+      'TestSuite#test_3',
+      'TestSuite#test_4'
+    ])
+    timing_data = {
+      'TestSuite#test_1' => 10_000.0,
+      'TestSuite#test_2' => 10_000.0,
+      'TestSuite#test_3' => 10_000.0,
+      'TestSuite#test_4' => 10_000.0
+    }
+
+    chunks = order_with_timing(tests, timing_data)
+    
+    # Total duration = 40,000ms
+    # Parallel jobs = 4
+    # Calculated base_max_duration = 40,000 / 4 = 10,000ms
+    # However, 10,000ms < configured @max_duration (120,000ms), so floor logic applies
+    # Actual max_duration used = max(10,000, 120,000) = 120,000ms
+    # With 10% buffer, effective_max = 120,000 * 0.9 = 108,000ms
+    # All 4 tests fit in one chunk: 4 * 10,000 = 40,000ms < 108,000ms
+    # Due to floor logic, everything fits in one chunk
+    test_suite_chunks = chunks.select { |c| c.suite_name == 'TestSuite' }
+    assert_equal 1, test_suite_chunks.size, 'Due to floor logic, all tests fit in one chunk'
+  ensure
+    ENV.delete('BUILDKITE_PARALLEL_JOB_COUNT')
+  end
+
+  def test_dynamic_max_duration_falls_back_to_configured_when_no_env_var
+    # Ensure env var is not set
+    ENV.delete('BUILDKITE_PARALLEL_JOB_COUNT')
+    
+    tests = create_mock_tests(['TestSuite#test_1'])
+    timing_data = { 'TestSuite#test_1' => 1000.0 }
+
+    chunks = order_with_timing(tests, timing_data)
+    
+    # Should use configured max_duration (120,000ms default)
+    # So test should fit in one chunk
+    assert_equal 1, chunks.size
+  end
+
+  def test_dynamic_max_duration_uses_floor_when_calculated_value_too_small
+    # Set up parallel job count that would result in very small chunks
+    ENV['BUILDKITE_PARALLEL_JOB_COUNT'] = '100'
+    
+    tests = create_mock_tests(['TestSuite#test_1'])
+    timing_data = { 'TestSuite#test_1' => 1000.0 }
+
+    chunks = order_with_timing(tests, timing_data)
+    
+    # Calculated max = 1000 / 100 = 10ms (too small)
+    # Should use configured max_duration (120,000ms) as floor
+    # So test should fit in one chunk
+    assert_equal 1, chunks.size
+  ensure
+    ENV.delete('BUILDKITE_PARALLEL_JOB_COUNT')
+  end
+
+  def test_dynamic_max_duration_with_large_parallelism
+    # Set up large parallel job count
+    ENV['BUILDKITE_PARALLEL_JOB_COUNT'] = '10'
+    
+    tests = create_mock_tests((1..20).map { |i| "TestSuite#test_#{i}" })
+    timing_data = (1..20).each_with_object({}) do |i, hash|
+      hash["TestSuite#test_#{i}"] = 5000.0
+    end
+
+    chunks = order_with_timing(tests, timing_data)
+    
+    # Total duration = 20 * 5000 = 100,000ms
+    # Parallel jobs = 10
+    # Calculated base_max_duration = 100,000 / 10 = 10,000ms
+    # However, 10,000ms < configured @max_duration (120,000ms), so floor logic applies
+    # Actual max_duration used = max(10,000, 120,000) = 120,000ms
+    # With 10% buffer, effective_max = 120,000 * 0.9 = 108,000ms
+    # All 20 tests fit in one chunk: 20 * 5,000 = 100,000ms < 108,000ms
+    # Due to floor logic, everything fits in one chunk
+    test_suite_chunks = chunks.select { |c| c.suite_name == 'TestSuite' }
+    assert_equal 1, test_suite_chunks.size, 'Due to floor logic, all tests fit in one chunk'
+  ensure
+    ENV.delete('BUILDKITE_PARALLEL_JOB_COUNT')
+  end
+
+  def test_dynamic_max_duration_exceeds_default_max_causes_splits
+    # Set up scenario where computed chunk size > default max_duration
+    ENV['BUILDKITE_PARALLEL_JOB_COUNT'] = '2'
+    
+    # Create tests with large total duration
+    tests = create_mock_tests((1..10).map { |i| "TestSuite#test_#{i}" })
+    timing_data = (1..10).each_with_object({}) do |i, hash|
+      hash["TestSuite#test_#{i}"] = 30_000.0  # Each test is 30 seconds
+    end
+
+    chunks = order_with_timing(tests, timing_data)
+    
+    # Total duration = 10 * 30,000 = 300,000ms
+    # Parallel jobs = 2
+    # Calculated base_max_duration = 300,000 / 2 = 150,000ms
+    # 150,000ms > configured @max_duration (120,000ms), so use calculated value
+    # Actual max_duration used = max(150,000, 120,000) = 150,000ms
+    # With 10% buffer, effective_max = 150,000 * 0.9 = 135,000ms
+    # Each test is 30,000ms, so we can fit 4 per chunk (4 * 30,000 = 120,000 < 135,000)
+    # But we have 10 tests, so we'll get multiple chunks
+    test_suite_chunks = chunks.select { |c| c.suite_name == 'TestSuite' }
+    assert test_suite_chunks.size >= 2, 'Should create multiple chunks when computed max exceeds default'
+    
+    # Verify chunks use the larger calculated max_duration
+    # First chunk should have ~4 tests (4 * 30,000 = 120,000 < 135,000)
+    first_chunk = test_suite_chunks.first
+    assert first_chunk.estimated_duration <= 135_000, 'Chunk should respect effective_max'
+  ensure
+    ENV.delete('BUILDKITE_PARALLEL_JOB_COUNT')
+  end
+
   private
 
   def create_mock_tests(test_ids)
