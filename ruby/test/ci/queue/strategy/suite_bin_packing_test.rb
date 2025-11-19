@@ -183,6 +183,116 @@ class SuiteBinPackingTest < Minitest::Test
     assert_equal 'SmallTest:full_suite', chunk.id
   end
 
+  def test_extract_suite_name_with_regular_format
+    tests = create_mock_tests([
+      'UserTest#test_create',
+      'UserTest#test_update',
+      'OrderTest#test_process'
+    ])
+
+    chunks = @strategy.order_tests(tests)
+
+    suite_names = chunks.map(&:suite_name).uniq.sort
+    assert_equal ['OrderTest', 'UserTest'], suite_names
+  end
+
+  def test_extract_suite_name_with_spec_style_single_colon
+    tests = create_mock_tests([
+      'Users::UserTest#test_create',
+      'Users::UserTest#test_update',
+      'Orders::OrderTest#test_process'
+    ])
+
+    chunks = @strategy.order_tests(tests)
+
+    suite_names = chunks.map(&:suite_name).uniq.sort
+    # Should extract 'Users' and 'Orders' (first part before ::)
+    assert_equal ['Orders', 'Users'], suite_names
+  end
+
+  def test_extract_suite_name_with_spec_style_multiple_colons
+    tests = create_mock_tests([
+      'Api::V1::UsersControllerTest#test_index',
+      'Api::V1::UsersControllerTest#test_show',
+      'Api::V2::OrdersControllerTest#test_create'
+    ])
+
+    chunks = @strategy.order_tests(tests)
+
+    suite_names = chunks.map(&:suite_name).uniq.sort
+    # Should extract 'Api' (first part before first ::)
+    assert_equal ['Api'], suite_names
+    # All tests should be grouped under 'Api'
+    api_chunks = chunks.select { |c| c.suite_name == 'Api' }
+    assert_equal 1, api_chunks.size
+  end
+
+  def test_extract_suite_name_mixed_formats
+    tests = create_mock_tests([
+      'SimpleTest#test_one',
+      'Module::NestedTest#test_two',
+      'AnotherSimpleTest#test_three'
+    ])
+
+    chunks = @strategy.order_tests(tests)
+
+    suite_names = chunks.map(&:suite_name).uniq.sort
+    # SimpleTest and AnotherSimpleTest should remain as-is
+    # Module::NestedTest should extract to 'Module'
+    assert_equal ['AnotherSimpleTest', 'Module', 'SimpleTest'], suite_names
+  end
+
+  def test_extract_suite_name_preserves_grouping_with_spec_style
+    tests = create_mock_tests([
+      'Api::UsersControllerTest#test_index',
+      'Api::UsersControllerTest#test_show',
+      'Api::UsersControllerTest#test_create',
+      'Web::UsersControllerTest#test_index'
+    ])
+
+    chunks = @strategy.order_tests(tests)
+
+    # Api::* tests should be grouped under 'Api'
+    api_chunks = chunks.select { |c| c.suite_name == 'Api' }
+    assert_equal 1, api_chunks.size
+    assert api_chunks.first.full_suite?
+    assert_equal 3, api_chunks.first.test_count
+
+    # Web::* tests should be grouped under 'Web'
+    web_chunks = chunks.select { |c| c.suite_name == 'Web' }
+    assert_equal 1, web_chunks.size
+    assert web_chunks.first.full_suite?
+    assert_equal 1, web_chunks.first.test_count
+  end
+
+  def test_extract_suite_name_with_spaces_in_scenario_name
+    tests = create_mock_tests([
+      'Api::V1::UsersController#test create user',
+      'Api::V1::UsersController#test create user with valid data',
+      'Api::V1::UsersController#test update user profile',
+      'Web::V1::OrdersController#test process order'
+    ])
+
+    chunks = @strategy.order_tests(tests)
+
+    suite_names = chunks.map(&:suite_name).uniq.sort
+    # Should extract 'Api' and 'Web' (first part before ::)
+    # Spaces in scenario names should not affect suite name extraction
+    assert_equal ['Api', 'Web'], suite_names
+
+    # Api::* tests should be grouped under 'Api' regardless of spaces in scenario names
+    api_chunks = chunks.select { |c| c.suite_name == 'Api' }
+    assert_equal 1, api_chunks.size
+    assert api_chunks.first.full_suite?
+    assert_equal 3, api_chunks.first.test_count
+
+    # Web::* tests should be grouped under 'Web'
+    web_chunks = chunks.select { |c| c.suite_name == 'Web' }
+    assert_equal 1, web_chunks.size
+    assert web_chunks.first.full_suite?
+    assert_equal 1, web_chunks.first.test_count
+  end
+
   private
 
   def create_mock_tests(test_ids)

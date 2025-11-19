@@ -57,7 +57,14 @@ module CI
         private
 
         def extract_suite_name(test_id)
-          test_id.split('#').first
+          suite_name = test_id.split('#').first
+
+          # if the test were a spec style test, we would need to extract the suite name from the first part again
+          if suite_name.include?('::')
+            suite_name.split('::').first
+          else
+            suite_name
+          end
         end
 
         def get_test_duration(test_id)
