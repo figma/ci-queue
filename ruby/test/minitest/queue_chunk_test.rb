@@ -30,7 +30,7 @@ class QueueChunkTest < Minitest::Test
     result1 = MockResult.new(passed: true)
     result2 = MockResult.new(passed: true)
 
-    chunk = MockResolvedChunk.new('TestA:full_suite', 'TestA', [test1, test2])
+    chunk = MockResolvedChunk.new('TestA:chunk_0', 'TestA', [test1, test2])
 
     test1.stub(:run, result1) do
       test2.stub(:run, result2) do
@@ -47,7 +47,7 @@ class QueueChunkTest < Minitest::Test
 
     # Chunk should be acknowledged (by its ID)
     assert_equal 1, @queue_impl.acknowledged.size
-    assert_includes @queue_impl.acknowledged, 'TestA:full_suite'
+    assert_includes @queue_impl.acknowledged, 'TestA:chunk_0'
   end
 
   def test_chunk_execution_continues_after_failure
@@ -56,7 +56,7 @@ class QueueChunkTest < Minitest::Test
     result1 = MockResult.new(passed: false)
     result2 = MockResult.new(passed: true)
 
-    chunk = MockResolvedChunk.new('TestA:full_suite', 'TestA', [test1, test2])
+    chunk = MockResolvedChunk.new('TestA:chunk_0', 'TestA', [test1, test2])
 
     test1.stub(:run, result1) do
       test2.stub(:run, result2) do
@@ -74,7 +74,7 @@ class QueueChunkTest < Minitest::Test
   end
 
   def test_duck_typing_for_chunk_detection
-    chunk = MockResolvedChunk.new('TestA:full_suite', 'TestA', [])
+    chunk = MockResolvedChunk.new('TestA:chunk_0', 'TestA', [])
 
     assert chunk.respond_to?(:chunk?)
     assert chunk.chunk?
@@ -86,7 +86,7 @@ class QueueChunkTest < Minitest::Test
     result1 = MockResult.new(passed: false)
     result2 = MockResult.new(passed: true)
 
-    chunk = MockResolvedChunk.new('TestA:full_suite', 'TestA', [test1, test2])
+    chunk = MockResolvedChunk.new('TestA:chunk_0', 'TestA', [test1, test2])
 
     # Stub CI::Queue.requeueable? to return true for failed tests
     CI::Queue.stub(:requeueable?, true) do
@@ -107,7 +107,7 @@ class QueueChunkTest < Minitest::Test
 
     # Chunk should be acknowledged
     assert_equal 1, @queue_impl.acknowledged.size
-    assert_includes @queue_impl.acknowledged, 'TestA:full_suite'
+    assert_includes @queue_impl.acknowledged, 'TestA:chunk_0'
 
     # Failed test should be requeued individually
     assert_equal 1, @queue_impl.requeued_tests.size
@@ -125,7 +125,7 @@ class QueueChunkTest < Minitest::Test
       known_flaky_tests: Set.new(['TestA#test_1'])
     )
 
-    chunk = MockResolvedChunk.new('TestA:full_suite', 'TestA', [test1, test2])
+    chunk = MockResolvedChunk.new('TestA:chunk_0', 'TestA', [test1, test2])
 
     CI::Queue.stub(:requeueable?, true) do
       test1.stub(:run, result1) do
@@ -140,7 +140,7 @@ class QueueChunkTest < Minitest::Test
 
     # Chunk should be acknowledged
     assert_equal 1, @queue_impl.acknowledged.size
-    assert_includes @queue_impl.acknowledged, 'TestA:full_suite'
+    assert_includes @queue_impl.acknowledged, 'TestA:chunk_0'
 
     # Known flaky test should NOT be requeued even though it failed
     assert_equal 0, @queue_impl.requeued_tests.size

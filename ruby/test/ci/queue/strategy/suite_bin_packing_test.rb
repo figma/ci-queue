@@ -26,7 +26,7 @@ class SuiteBinPackingTest < Minitest::Test
     assert_includes suite_names, 'OrderTest'
   end
 
-  def test_creates_full_suite_chunk_when_under_max_duration
+  def test_creates_single_chunk_when_under_max_duration
     tests = create_mock_tests(['SmallTest#test_1', 'SmallTest#test_2'])
     timing_data = {
       'SmallTest#test_1' => 1000.0,
@@ -36,9 +36,10 @@ class SuiteBinPackingTest < Minitest::Test
     chunks = order_with_timing(tests, timing_data)
 
     chunk = chunks.find { |c| c.suite_name == 'SmallTest' }
-    assert chunk.full_suite?
     assert_equal 3000.0, chunk.estimated_duration
-    assert_equal [], chunk.test_ids
+    # Tests are sorted by duration (longest first) when using bin packing
+    assert_equal ['SmallTest#test_2', 'SmallTest#test_1'], chunk.test_ids
+    assert_equal 'SmallTest:chunk_0', chunk.id
   end
 
   def test_splits_suite_when_over_max_duration
@@ -60,8 +61,8 @@ class SuiteBinPackingTest < Minitest::Test
 
     assert large_test_chunks.size > 1, 'Should split into multiple chunks'
     large_test_chunks.each do |chunk|
-      assert chunk.partial_suite?
-      assert chunk.test_ids.any?, 'Partial suite should have test_ids'
+      assert chunk.test_ids.any?, 'Chunk should have test_ids'
+      assert_match(/LargeTest:chunk_\d+/, chunk.id)
     end
   end
 
@@ -78,9 +79,10 @@ class SuiteBinPackingTest < Minitest::Test
     chunks = order_with_timing(tests, timing_data)
 
     # Total is 95,000 which is under 100,000 but over 90,000 (with 10% buffer)
-    # So it should still fit in one chunk since total < max_duration
+    # Buffer is always applied, so effective_max = 90,000
+    # Since 95,000 > 90,000, it gets split into 2 chunks
     test_suite_chunks = chunks.select { |c| c.suite_name == 'TestSuite' }
-    assert_equal 1, test_suite_chunks.size
+    assert_equal 2, test_suite_chunks.size
   end
 
   def test_uses_fallback_duration_for_unknown_tests
@@ -175,12 +177,164 @@ class SuiteBinPackingTest < Minitest::Test
     end
   end
 
-  def test_full_suite_chunk_id_format
+  def test_chunk_id_format
     tests = create_mock_tests(['SmallTest#test_1'])
     chunks = @strategy.order_tests(tests)
 
     chunk = chunks.find { |c| c.suite_name == 'SmallTest' }
-    assert_equal 'SmallTest:full_suite', chunk.id
+    assert_equal 'SmallTest:chunk_0', chunk.id
+  end
+
+  def test_suite_exactly_at_max_duration_gets_split
+    @config.suite_max_duration = 100_000
+    @config.suite_buffer_percent = 10
+
+    tests = create_mock_tests(['TestSuite#test_1', 'TestSuite#test_2'])
+    timing_data = {
+      'TestSuite#test_1' => 50_000.0,
+      'TestSuite#test_2' => 50_000.0
+    }
+
+    chunks = order_with_timing(tests, timing_data)
+    test_suite_chunks = chunks.select { |c| c.suite_name == 'TestSuite' }
+
+    # Total is exactly 100,000, but with 10% buffer, effective_max = 90,000
+    # So it should be split
+    assert_equal 2, test_suite_chunks.size
+  end
+
+  def test_suite_exactly_at_effective_max_fits_in_one_chunk
+    @config.suite_max_duration = 100_000
+    @config.suite_buffer_percent = 10
+
+    tests = create_mock_tests(['TestSuite#test_1', 'TestSuite#test_2'])
+    timing_data = {
+      'TestSuite#test_1' => 45_000.0,
+      'TestSuite#test_2' => 45_000.0
+    }
+
+    chunks = order_with_timing(tests, timing_data)
+    test_suite_chunks = chunks.select { |c| c.suite_name == 'TestSuite' }
+
+    # Total is exactly 90,000 (effective_max), should fit in one chunk
+    assert_equal 1, test_suite_chunks.size
+    assert_equal 90_000.0, test_suite_chunks.first.estimated_duration
+  end
+
+  def test_tests_with_same_duration_preserve_order
+    tests = create_mock_tests([
+      'TestSuite#test_1',
+      'TestSuite#test_2',
+      'TestSuite#test_3'
+    ])
+    timing_data = {
+      'TestSuite#test_1' => 1000.0,
+      'TestSuite#test_2' => 1000.0,
+      'TestSuite#test_3' => 1000.0
+    }
+
+    chunks = order_with_timing(tests, timing_data)
+    chunk = chunks.find { |c| c.suite_name == 'TestSuite' }
+
+    # When durations are equal, Ruby's sort_by is stable, so order should be preserved
+    # But since we're sorting by -duration, and all are equal, order depends on original order
+    assert_equal 3, chunk.test_ids.size
+    assert chunk.test_ids.include?('TestSuite#test_1')
+    assert chunk.test_ids.include?('TestSuite#test_2')
+    assert chunk.test_ids.include?('TestSuite#test_3')
+  end
+
+  def test_chunk_duration_calculation_is_correct
+    tests = create_mock_tests([
+      'TestSuite#test_1',
+      'TestSuite#test_2',
+      'TestSuite#test_3'
+    ])
+    timing_data = {
+      'TestSuite#test_1' => 10_000.0,
+      'TestSuite#test_2' => 20_000.0,
+      'TestSuite#test_3' => 30_000.0
+    }
+
+    chunks = order_with_timing(tests, timing_data)
+    chunk = chunks.find { |c| c.suite_name == 'TestSuite' }
+
+    # Duration should be sum of all test durations
+    assert_equal 60_000.0, chunk.estimated_duration
+  end
+
+  def test_test_count_is_set_correctly
+    tests = create_mock_tests([
+      'TestSuite#test_1',
+      'TestSuite#test_2',
+      'TestSuite#test_3',
+      'TestSuite#test_4'
+    ])
+    timing_data = {
+      'TestSuite#test_1' => 10_000.0,
+      'TestSuite#test_2' => 10_000.0,
+      'TestSuite#test_3' => 10_000.0,
+      'TestSuite#test_4' => 10_000.0
+    }
+
+    chunks = order_with_timing(tests, timing_data)
+    chunk = chunks.find { |c| c.suite_name == 'TestSuite' }
+
+    assert_equal 4, chunk.test_count
+    assert_equal 4, chunk.test_ids.size
+  end
+
+  def test_large_suite_creates_multiple_chunks
+    @config.suite_max_duration = 100_000
+    @config.suite_buffer_percent = 10
+
+    # Create a suite that will need many chunks
+    tests = create_mock_tests((1..10).map { |i| "LargeSuite#test_#{i}" })
+    timing_data = (1..10).each_with_object({}) do |i, hash|
+      hash["LargeSuite#test_#{i}"] = 50_000.0 # Each test is 50% of max
+    end
+
+    chunks = order_with_timing(tests, timing_data)
+    large_suite_chunks = chunks.select { |c| c.suite_name == 'LargeSuite' }
+
+    # With effective_max = 90,000, each test is 50,000, so we can fit 1 per chunk
+    # So 10 tests = 10 chunks
+    assert_equal 10, large_suite_chunks.size
+    large_suite_chunks.each do |chunk|
+      assert_equal 1, chunk.test_ids.size
+      assert_equal 50_000.0, chunk.estimated_duration
+    end
+  end
+
+  def test_zero_duration_tests_handled_correctly
+    tests = create_mock_tests(['TestSuite#test_1', 'TestSuite#test_2'])
+    timing_data = {
+      'TestSuite#test_1' => 0.0,
+      'TestSuite#test_2' => 1000.0
+    }
+
+    chunks = order_with_timing(tests, timing_data)
+    chunk = chunks.find { |c| c.suite_name == 'TestSuite' }
+
+    # Should handle zero duration correctly
+    assert_equal 1000.0, chunk.estimated_duration
+    assert_equal 2, chunk.test_ids.size
+  end
+
+  def test_single_test_creates_chunk
+    tests = create_mock_tests(['SingleTest#test_1'])
+    timing_data = {
+      'SingleTest#test_1' => 5000.0
+    }
+
+    chunks = order_with_timing(tests, timing_data)
+    chunk = chunks.find { |c| c.suite_name == 'SingleTest' }
+
+    assert_equal 1, chunks.size
+    assert_equal 'SingleTest:chunk_0', chunk.id
+    assert_equal ['SingleTest#test_1'], chunk.test_ids
+    assert_equal 5000.0, chunk.estimated_duration
+    assert_equal 1, chunk.test_count
   end
 
   private

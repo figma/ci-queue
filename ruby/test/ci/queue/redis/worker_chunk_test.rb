@@ -25,8 +25,9 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
   def test_populate_stores_chunk_metadata_in_redis
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2'])
+    test_ids = ['TestA#test_1', 'TestA#test_2']
     chunks = [
-      CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 5000.0)
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 5000.0)
     ]
 
     # Simulate strategy returning chunks
@@ -35,31 +36,12 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
 
     # Verify chunk metadata was stored
-    chunk_data = @redis.get('build:42:chunk:TestA:full_suite')
-    refute_nil chunk_data
-
-    parsed = JSON.parse(chunk_data)
-    assert_equal 'full_suite', parsed['type']
-    assert_equal 'TestA', parsed['suite_name']
-    assert_equal 5000.0, parsed['estimated_duration']
-  end
-
-  def test_populate_stores_partial_suite_with_test_ids
-    tests = create_mock_tests(['TestA#test_1', 'TestA#test_2'])
-    test_ids = ['TestA#test_1', 'TestA#test_2']
-    chunks = [
-      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', :partial_suite, test_ids, 3000.0)
-    ]
-
-    @worker.stub(:reorder_tests, chunks) do
-      @worker.populate(tests)
-    end
-
     chunk_data = @redis.get('build:42:chunk:TestA:chunk_0')
     refute_nil chunk_data
 
     parsed = JSON.parse(chunk_data)
-    assert_equal 'partial_suite', parsed['type']
+    assert_equal 'TestA', parsed['suite_name']
+    assert_equal 5000.0, parsed['estimated_duration']
     assert_equal test_ids, parsed['test_ids']
   end
 
@@ -89,7 +71,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
   end
 
   def test_chunk_id_detection
-    assert @worker.send(:chunk_id?, 'TestA:full_suite')
+    assert @worker.send(:chunk_id?, 'TestA:chunk_0')
     assert @worker.send(:chunk_id?, 'TestB:chunk_0')
     assert @worker.send(:chunk_id?, 'TestC:chunk_5')
     refute @worker.send(:chunk_id?, 'TestA#test_method')
@@ -106,10 +88,11 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     assert_equal 'TestA#test_1', executable.id
   end
 
-  def test_resolve_full_suite_chunk
+  def test_resolve_chunk
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2', 'TestA#test_3'])
+    test_ids = ['TestA#test_1', 'TestA#test_2', 'TestA#test_3']
     chunks = [
-      CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 3000.0)
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 3000.0)
     ]
 
     @worker.stub(:reorder_tests, chunks) do
@@ -117,20 +100,20 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
 
     # Manually store and resolve chunk
-    resolved = @worker.send(:resolve_chunk, 'TestA:full_suite')
+    resolved = @worker.send(:resolve_chunk, 'TestA:chunk_0')
 
     assert_instance_of CI::Queue::Redis::Worker::ResolvedChunk, resolved
-    assert_equal 'TestA:full_suite', resolved.id
+    assert_equal 'TestA:chunk_0', resolved.id
     assert_equal 'TestA', resolved.suite_name
     assert_equal 3, resolved.tests.size
-    assert resolved.tests.all? { |t| t.id.start_with?('TestA#') }
+    assert_equal test_ids, resolved.tests.map(&:id)
   end
 
-  def test_resolve_partial_suite_chunk
+  def test_resolve_chunk_with_subset_of_tests
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2', 'TestA#test_3'])
     test_ids = ['TestA#test_1', 'TestA#test_3']
     chunks = [
-      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', :partial_suite, test_ids, 2000.0)
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 2000.0)
     ]
 
     @worker.stub(:reorder_tests, chunks) do
@@ -146,17 +129,18 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
   end
 
   def test_resolve_chunk_returns_nil_for_missing_metadata
-    resolved = @worker.send(:resolve_chunk, 'NonexistentChunk:full_suite')
+    resolved = @worker.send(:resolve_chunk, 'NonexistentChunk:chunk_0')
     assert_nil resolved
   end
 
   def test_resolved_chunk_interface
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2'])
-    chunk = CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 2000.0)
+    test_ids = ['TestA#test_1', 'TestA#test_2']
+    chunk = CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 2000.0)
 
     resolved = CI::Queue::Redis::Worker::ResolvedChunk.new(chunk, tests)
 
-    assert_equal 'TestA:full_suite', resolved.id
+    assert_equal 'TestA:chunk_0', resolved.id
     assert_equal 'TestA', resolved.suite_name
     assert_equal 2, resolved.size
     assert resolved.chunk?
@@ -166,8 +150,9 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
   def test_resolved_chunk_detects_flaky_tests
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2'])
+    test_ids = ['TestA#test_1', 'TestA#test_2']
     tests.first.stub(:flaky?, true) do
-      chunk = CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 2000.0)
+      chunk = CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 2000.0)
       resolved = CI::Queue::Redis::Worker::ResolvedChunk.new(chunk, tests)
 
       assert resolved.flaky?
@@ -176,7 +161,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
   def test_acknowledge_chunk
     # Set up a chunk as if it were reserved (in running zset)
-    chunk_id = 'TestA:full_suite'
+    chunk_id = 'TestA:chunk_0'
     @redis.zadd('build:42:running', Time.now.to_i, chunk_id)
     @redis.hset('build:42:owners', chunk_id, 'build:42:worker:1:queue')
     @worker.instance_variable_set(:@reserved_test, chunk_id)
@@ -198,8 +183,9 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       'TestB#test_2'
     ])
 
+    test_ids = ['TestA#test_1']
     chunks = [
-      CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 1000.0),
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 1000.0),
       tests[1] # Individual test
     ]
 
@@ -209,21 +195,22 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
     # Check that both chunk and individual test IDs are in queue
     queue_items = @redis.lrange('build:42:queue', 0, -1)
-    assert_includes queue_items, 'TestA:full_suite'
+    assert_includes queue_items, 'TestA:chunk_0'
     assert_includes queue_items, 'TestB#test_1'
   end
 
   def test_chunk_metadata_has_ttl
     tests = create_mock_tests(['TestA#test_1'])
+    test_ids = ['TestA#test_1']
     chunks = [
-      CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 1000.0)
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 1000.0)
     ]
 
     @worker.stub(:reorder_tests, chunks) do
       @worker.populate(tests)
     end
 
-    ttl = @redis.ttl('build:42:chunk:TestA:full_suite')
+    ttl = @redis.ttl('build:42:chunk:TestA:chunk_0')
     assert ttl > 0, 'Chunk metadata should have TTL set'
   end
 
@@ -231,7 +218,8 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     # Create 20 test chunks to verify batching works (batch size is 7)
     tests = (1..20).map { |i| MockTest.new("TestSuite#{i}#test_1") }
     chunks = (1..20).map do |i|
-      CI::Queue::TestChunk.new("TestSuite#{i}:full_suite", "TestSuite#{i}", :full_suite, [], 1000.0)
+      test_ids = ["TestSuite#{i}#test_1"]
+      CI::Queue::TestChunk.new("TestSuite#{i}:chunk_0", "TestSuite#{i}", test_ids, 1000.0)
     end
 
     @worker.stub(:reorder_tests, chunks) do
@@ -244,8 +232,8 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       refute_nil chunk_data, "Chunk #{chunk.id} should be stored"
 
       parsed = JSON.parse(chunk_data)
-      assert_equal 'full_suite', parsed['type']
       assert_equal chunk.suite_name, parsed['suite_name']
+      assert_equal chunk.test_ids, parsed['test_ids']
     end
 
     # Verify all chunk IDs are in the chunks set

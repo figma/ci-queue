@@ -26,8 +26,9 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
 
   def test_chunk_timeout_stored_in_redis_hash
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2', 'TestA#test_3'])
+    test_ids = ['TestA#test_1', 'TestA#test_2', 'TestA#test_3']
     chunks = [
-      CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 5000.0, test_count: 3)
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 5000.0, test_count: 3)
     ]
 
     @worker.stub(:reorder_tests, chunks) do
@@ -36,36 +37,38 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
 
     # Verify timeout was stored in test-group-timeout hash
     # Timeout should be: default_timeout (30s) * number_of_tests (3) = 90s
-    chunk_timeout = @redis.hget('build:42:test-group-timeout', 'TestA:full_suite')
+    chunk_timeout = @redis.hget('build:42:test-group-timeout', 'TestA:chunk_0')
     refute_nil chunk_timeout
     assert_equal '90', chunk_timeout
   end
 
   def test_chunk_timeout_scales_with_test_count
     # Small chunk: 5 tests
-    small_tests = create_mock_tests((1..5).map { |i| "SmallSuite#test_#{i}" })
-    small_chunk = CI::Queue::TestChunk.new('SmallSuite:full_suite', 'SmallSuite', :full_suite, [], 1000.0, test_count: 5)
+    small_test_ids = (1..5).map { |i| "SmallSuite#test_#{i}" }
+    small_tests = create_mock_tests(small_test_ids)
+    small_chunk = CI::Queue::TestChunk.new('SmallSuite:chunk_0', 'SmallSuite', small_test_ids, 1000.0, test_count: 5)
 
     worker = CI::Queue::Redis.new(@redis_url, @config)
     worker.stub(:reorder_tests, [small_chunk]) do
       worker.populate(small_tests)
     end
 
-    small_timeout = @redis.hget('build:42:test-group-timeout', 'SmallSuite:full_suite')
+    small_timeout = @redis.hget('build:42:test-group-timeout', 'SmallSuite:chunk_0')
     assert_equal '150', small_timeout # 30s * 5 tests
 
     @redis.flushdb
 
     # Large chunk: 20 tests
-    large_tests = create_mock_tests((1..20).map { |i| "LargeSuite#test_#{i}" })
-    large_chunk = CI::Queue::TestChunk.new('LargeSuite:full_suite', 'LargeSuite', :full_suite, [], 5000.0, test_count: 20)
+    large_test_ids = (1..20).map { |i| "LargeSuite#test_#{i}" }
+    large_tests = create_mock_tests(large_test_ids)
+    large_chunk = CI::Queue::TestChunk.new('LargeSuite:chunk_0', 'LargeSuite', large_test_ids, 5000.0, test_count: 20)
 
     worker = CI::Queue::Redis.new(@redis_url, @config)
     worker.stub(:reorder_tests, [large_chunk]) do
       worker.populate(large_tests)
     end
 
-    large_timeout = @redis.hget('build:42:test-group-timeout', 'LargeSuite:full_suite')
+    large_timeout = @redis.hget('build:42:test-group-timeout', 'LargeSuite:chunk_0')
     assert_equal '600', large_timeout # 30s * 20 tests
   end
 
@@ -77,9 +80,9 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     ])
 
     chunks = [
-      CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 2000.0, test_count: 2),
-      CI::Queue::TestChunk.new('TestB:full_suite', 'TestB', :full_suite, [], 3000.0, test_count: 3),
-      CI::Queue::TestChunk.new('TestC:full_suite', 'TestC', :full_suite, [], 1000.0, test_count: 1),
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', ['TestA#test_1', 'TestA#test_2'], 2000.0, test_count: 2),
+      CI::Queue::TestChunk.new('TestB:chunk_0', 'TestB', ['TestB#test_1', 'TestB#test_2', 'TestB#test_3'], 3000.0, test_count: 3),
+      CI::Queue::TestChunk.new('TestC:chunk_0', 'TestC', ['TestC#test_1'], 1000.0, test_count: 1),
     ]
 
     @worker.stub(:reorder_tests, chunks) do
@@ -87,15 +90,16 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     end
 
     # Verify each chunk has correct timeout
-    assert_equal '60', @redis.hget('build:42:test-group-timeout', 'TestA:full_suite') # 30s * 2
-    assert_equal '90', @redis.hget('build:42:test-group-timeout', 'TestB:full_suite') # 30s * 3
-    assert_equal '30', @redis.hget('build:42:test-group-timeout', 'TestC:full_suite') # 30s * 1
+    assert_equal '60', @redis.hget('build:42:test-group-timeout', 'TestA:chunk_0') # 30s * 2
+    assert_equal '90', @redis.hget('build:42:test-group-timeout', 'TestB:chunk_0') # 30s * 3
+    assert_equal '30', @redis.hget('build:42:test-group-timeout', 'TestC:chunk_0') # 30s * 1
   end
 
   def test_timeout_hash_has_ttl
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2'])
+    test_ids = ['TestA#test_1', 'TestA#test_2']
     chunks = [
-      CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 1000.0, test_count: 2)
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', test_ids, 1000.0, test_count: 2)
     ]
 
     @worker.stub(:reorder_tests, chunks) do
@@ -128,9 +132,9 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     ])
 
     chunks = [
-      CI::Queue::TestChunk.new('TestA:full_suite', 'TestA', :full_suite, [], 2000.0, test_count: 2),
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', ['TestA#test_1', 'TestA#test_2'], 2000.0, test_count: 2),
       tests[2], # Individual test TestB#test_1
-      CI::Queue::TestChunk.new('TestC:full_suite', 'TestC', :full_suite, [], 3000.0, test_count: 3),
+      CI::Queue::TestChunk.new('TestC:chunk_0', 'TestC', ['TestC#test_1', 'TestC#test_2', 'TestC#test_3'], 3000.0, test_count: 3),
     ]
 
     @worker.stub(:reorder_tests, chunks) do
@@ -138,8 +142,8 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     end
 
     # Chunks should have timeouts
-    assert_equal '60', @redis.hget('build:42:test-group-timeout', 'TestA:full_suite')
-    assert_equal '90', @redis.hget('build:42:test-group-timeout', 'TestC:full_suite')
+    assert_equal '60', @redis.hget('build:42:test-group-timeout', 'TestA:chunk_0')
+    assert_equal '90', @redis.hget('build:42:test-group-timeout', 'TestC:chunk_0')
 
     # Individual test should not
     assert_nil @redis.hget('build:42:test-group-timeout', 'TestB#test_1')
@@ -216,8 +220,9 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     worker1 = CI::Queue::Redis.new(@redis_url, config)
 
     # Create chunk with 5 tests -> timeout = 0.5s * 5 = 2.5s
-    tests = create_mock_tests((1..5).map { |i| "TestSuite#test_#{i}" })
-    chunk = CI::Queue::TestChunk.new('TestSuite:full_suite', 'TestSuite', :full_suite, [], 5000.0, test_count: 5)
+    test_ids = (1..5).map { |i| "TestSuite#test_#{i}" }
+    tests = create_mock_tests(test_ids)
+    chunk = CI::Queue::TestChunk.new('TestSuite:chunk_0', 'TestSuite', test_ids, 5000.0, test_count: 5)
 
     worker1.stub(:reorder_tests, [chunk]) do
       worker1.populate(tests)
@@ -225,7 +230,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
 
     # Reserve the chunk with worker1
     reserved_id = worker1.send(:try_to_reserve_test)
-    assert_equal 'TestSuite:full_suite', reserved_id
+    assert_equal 'TestSuite:chunk_0', reserved_id
 
     # Wait 1 second (less than 2.5s timeout)
     sleep 1
@@ -276,7 +281,8 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     # Create 15 chunks to test batching (batch size is 5)
     tests = (1..15).map { |i| MockTest.new("TestSuite#{i}#test_1") }
     chunks = (1..15).map do |i|
-      CI::Queue::TestChunk.new("TestSuite#{i}:full_suite", "TestSuite#{i}", :full_suite, [], 1000.0, test_count: 1)
+      test_ids = ["TestSuite#{i}#test_1"]
+      CI::Queue::TestChunk.new("TestSuite#{i}:chunk_0", "TestSuite#{i}", test_ids, 1000.0, test_count: 1)
     end
 
     @worker.stub(:reorder_tests, chunks) do

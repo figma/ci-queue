@@ -455,7 +455,7 @@ class CI::Queue::RedisTest < Minitest::Test
     assert_equal 1, chunks.size
     chunk = chunks.first
     assert chunk.chunk?, "Expected a chunk"
-    assert_equal 'TestSuite:full_suite', chunk.id
+    assert_equal 'TestSuite:chunk_0', chunk.id
     assert_equal 8000.0, chunk.estimated_duration
   end
 
@@ -599,11 +599,11 @@ class CI::Queue::RedisTest < Minitest::Test
 
     # Should be ordered by duration descending: SlowTest, MediumTest, FastTest
     assert_equal 3, chunks.size
-    assert_equal 'SlowTest:full_suite', chunks[0].id
+    assert_equal 'SlowTest:chunk_0', chunks[0].id
     assert_equal 10_000.0, chunks[0].estimated_duration
-    assert_equal 'MediumTest:full_suite', chunks[1].id
+    assert_equal 'MediumTest:chunk_0', chunks[1].id
     assert_equal 5000.0, chunks[1].estimated_duration
-    assert_equal 'FastTest:full_suite', chunks[2].id
+    assert_equal 'FastTest:chunk_0', chunks[2].id
     assert_equal 1000.0, chunks[2].estimated_duration
   end
 
