@@ -88,18 +88,14 @@ module CI
           # Apply buffer to max duration
           effective_max = @max_duration * (1 - @buffer_percent / 100.0)
 
-          # Sort tests by duration (longest first for better bin packing)
-          sorted_tests = suite_tests.sort_by do |test|
-            -get_test_duration(test.id)
-          end
-
-          # First-fit decreasing bin packing
+          # Preserve original test order (as they appear in the file)
+          # First-fit bin packing (preserving order)
           chunks = []
           current_chunk_tests = []
           current_chunk_duration = 0.0
           chunk_index = 0
 
-          sorted_tests.each do |test|
+          suite_tests.each do |test|
             test_duration = get_test_duration(test.id)
 
             if current_chunk_duration + test_duration > effective_max && current_chunk_tests.any?

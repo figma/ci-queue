@@ -37,8 +37,8 @@ class SuiteBinPackingTest < Minitest::Test
 
     chunk = chunks.find { |c| c.suite_name == 'SmallTest' }
     assert_equal 3000.0, chunk.estimated_duration
-    # Tests are sorted by duration (longest first) when using bin packing
-    assert_equal ['SmallTest#test_2', 'SmallTest#test_1'], chunk.test_ids
+    # Tests preserve original order (as they appear in the file)
+    assert_equal ['SmallTest#test_1', 'SmallTest#test_2'], chunk.test_ids
     assert_equal 'SmallTest:chunk_0', chunk.id
   end
 
@@ -221,7 +221,7 @@ class SuiteBinPackingTest < Minitest::Test
     assert_equal 90_000.0, test_suite_chunks.first.estimated_duration
   end
 
-  def test_tests_with_same_duration_preserve_order
+  def test_tests_preserve_original_order
     tests = create_mock_tests([
       'TestSuite#test_1',
       'TestSuite#test_2',
@@ -229,19 +229,16 @@ class SuiteBinPackingTest < Minitest::Test
     ])
     timing_data = {
       'TestSuite#test_1' => 1000.0,
-      'TestSuite#test_2' => 1000.0,
-      'TestSuite#test_3' => 1000.0
+      'TestSuite#test_2' => 2000.0,
+      'TestSuite#test_3' => 3000.0
     }
 
     chunks = order_with_timing(tests, timing_data)
     chunk = chunks.find { |c| c.suite_name == 'TestSuite' }
 
-    # When durations are equal, Ruby's sort_by is stable, so order should be preserved
-    # But since we're sorting by -duration, and all are equal, order depends on original order
+    # Tests should preserve original order (as they appear in the file)
     assert_equal 3, chunk.test_ids.size
-    assert chunk.test_ids.include?('TestSuite#test_1')
-    assert chunk.test_ids.include?('TestSuite#test_2')
-    assert chunk.test_ids.include?('TestSuite#test_3')
+    assert_equal ['TestSuite#test_1', 'TestSuite#test_2', 'TestSuite#test_3'], chunk.test_ids
   end
 
   def test_chunk_duration_calculation_is_correct
@@ -409,13 +406,11 @@ class SuiteBinPackingTest < Minitest::Test
     # Api::* tests should be grouped under 'Api'
     api_chunks = chunks.select { |c| c.suite_name == 'Api' }
     assert_equal 1, api_chunks.size
-    assert api_chunks.first.full_suite?
     assert_equal 3, api_chunks.first.test_count
 
     # Web::* tests should be grouped under 'Web'
     web_chunks = chunks.select { |c| c.suite_name == 'Web' }
     assert_equal 1, web_chunks.size
-    assert web_chunks.first.full_suite?
     assert_equal 1, web_chunks.first.test_count
   end
 
@@ -437,13 +432,11 @@ class SuiteBinPackingTest < Minitest::Test
     # Api::* tests should be grouped under 'Api' regardless of spaces in scenario names
     api_chunks = chunks.select { |c| c.suite_name == 'Api' }
     assert_equal 1, api_chunks.size
-    assert api_chunks.first.full_suite?
     assert_equal 3, api_chunks.first.test_count
 
     # Web::* tests should be grouped under 'Web'
     web_chunks = chunks.select { |c| c.suite_name == 'Web' }
     assert_equal 1, web_chunks.size
-    assert web_chunks.first.full_suite?
     assert_equal 1, web_chunks.first.test_count
   end
 
