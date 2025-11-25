@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 module CI
   module Queue
     module Redis
@@ -8,7 +9,7 @@ module CI
         TEN_MINUTES = 60 * 10
         CONNECTION_ERRORS = [
           ::Redis::BaseConnectionError,
-          ::SocketError, # https://github.com/redis/redis-rb/pull/631
+          ::SocketError # https://github.com/redis/redis-rb/pull/631
         ].freeze
 
         def initialize(redis_url, config)
@@ -54,12 +55,11 @@ module CI
 
         def wait_for_master(timeout: 120)
           return true if master?
+
           (timeout * 10 + 1).to_i.times do
-            if queue_initialized?
-              return true
-            else
-              sleep 0.1
-            end
+            return true if queue_initialized?
+
+            sleep 0.1
           end
           raise LostMaster, "The master worker is still `#{master_status}` after #{timeout} seconds waiting."
         end
@@ -71,7 +71,7 @@ module CI
         def queue_initialized?
           @queue_initialized ||= begin
             status = master_status
-            status == 'ready' || status == 'finished'
+            %w[ready finished].include?(status)
           end
         end
 
@@ -91,6 +91,10 @@ module CI
           return false if config.max_test_failed.nil?
 
           test_failed >= config.max_test_failed
+        end
+
+        def master_worker_id
+          redis.get(key('master-worker-id'))
         end
 
         private

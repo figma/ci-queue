@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require_relative 'base'
 require 'json'
 
@@ -20,20 +21,18 @@ module CI
         def initialize(config, redis: nil)
           super(config)
 
-          if redis
-            @moving_average = CI::Queue::Redis::TestDurationMovingAverages.new(redis)
-          end
+          @moving_average = CI::Queue::Redis::TestDurationMovingAverages.new(redis) if redis
 
-          if config&.timing_file
-            @timing_data = self.class.load_timing_data(config.timing_file)
-          else
-            @timing_data = {}
-          end
+          @timing_data = if config&.timing_file
+                           self.class.load_timing_data(config.timing_file)
+                         else
+                           {}
+                         end
 
           @max_duration = config&.suite_max_duration || 120_000
           @fallback_duration = config&.timing_fallback_duration || 100.0
           @buffer_percent = config&.suite_buffer_percent || 10
-          
+
           # Cache for test durations to avoid redundant lookups
           @duration_cache = {}
         end
@@ -41,10 +40,10 @@ module CI
         def order_tests(tests, random: ::Random.new, redis: nil)
           # Clear duration cache for this ordering run
           @duration_cache.clear
-          
+
           # Calculate dynamic max_duration based on total duration and parallelism
           dynamic_max_duration = calculate_dynamic_max_duration(tests)
-          
+
           # Group tests by suite name
           suites = tests.group_by { |test| extract_suite_name(test.id) }
 
@@ -55,7 +54,7 @@ module CI
               create_chunks_for_suite(
                 suite_name,
                 suite_tests,
-                dynamic_max_duration,
+                dynamic_max_duration
               )
             )
           end
@@ -82,19 +81,19 @@ module CI
           return @duration_cache[test_id] if @duration_cache.key?(test_id)
 
           duration = if @moving_average
-            avg = @moving_average[test_id]
-            if avg
-              avg
-            elsif @timing_data.key?(test_id)
-              @timing_data[test_id]
-            else
-              @fallback_duration
-            end
-          elsif @timing_data.key?(test_id)
-            @timing_data[test_id]
-          else
-            @fallback_duration
-          end
+                       avg = @moving_average[test_id]
+                       if avg
+                         avg
+                       elsif @timing_data.key?(test_id)
+                         @timing_data[test_id]
+                       else
+                         @fallback_duration
+                       end
+                     elsif @timing_data.key?(test_id)
+                       @timing_data[test_id]
+                     else
+                       @fallback_duration
+                     end
 
           # Cache the result
           @duration_cache[test_id] = duration
@@ -104,7 +103,7 @@ module CI
         def calculate_dynamic_max_duration(tests)
           # Get parallel job count from environment variable
           parallel_job_count = ENV['BUILDKITE_PARALLEL_JOB_COUNT']&.to_i
-          
+
           puts "parallel_job_count: #{parallel_job_count}"
 
           # If no parallel job count, fall back to configured max_duration
@@ -120,7 +119,7 @@ module CI
           base_max_duration = total_duration.to_f / parallel_job_count
 
           puts "base_max_duration: #{base_max_duration}, @max_duration: #{@max_duration}"
-          
+
           # Ensure we don't go below a minimum reasonable value
           # Use configured max_duration as a floor to prevent extremely small chunks
           [base_max_duration, @max_duration].max
