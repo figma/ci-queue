@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require 'test_helper'
 
 class CI::Queue::DynamicTimeoutTest < Minitest::Test
@@ -74,15 +75,16 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
 
   def test_multiple_chunks_stored_with_different_timeouts
     tests = create_mock_tests([
-      'TestA#test_1', 'TestA#test_2', # 2 tests
-      'TestB#test_1', 'TestB#test_2', 'TestB#test_3', # 3 tests
-      'TestC#test_1', # 1 test
-    ])
+                                'TestA#test_1', 'TestA#test_2', # 2 tests
+                                'TestB#test_1', 'TestB#test_2', 'TestB#test_3', # 3 tests
+                                'TestC#test_1' # 1 test
+                              ])
 
     chunks = [
       CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', ['TestA#test_1', 'TestA#test_2'], 2000.0, test_count: 2),
-      CI::Queue::TestChunk.new('TestB:chunk_0', 'TestB', ['TestB#test_1', 'TestB#test_2', 'TestB#test_3'], 3000.0, test_count: 3),
-      CI::Queue::TestChunk.new('TestC:chunk_0', 'TestC', ['TestC#test_1'], 1000.0, test_count: 1),
+      CI::Queue::TestChunk.new('TestB:chunk_0', 'TestB', ['TestB#test_1', 'TestB#test_2', 'TestB#test_3'], 3000.0,
+                               test_count: 3),
+      CI::Queue::TestChunk.new('TestC:chunk_0', 'TestC', ['TestC#test_1'], 1000.0, test_count: 1)
     ]
 
     @worker.stub(:reorder_tests, chunks) do
@@ -126,15 +128,16 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
 
   def test_mixed_chunks_and_tests_only_chunks_have_timeouts
     tests = create_mock_tests([
-      'TestA#test_1', 'TestA#test_2',
-      'TestB#test_1',
-      'TestC#test_1', 'TestC#test_2', 'TestC#test_3'
-    ])
+                                'TestA#test_1', 'TestA#test_2',
+                                'TestB#test_1',
+                                'TestC#test_1', 'TestC#test_2', 'TestC#test_3'
+                              ])
 
     chunks = [
       CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', ['TestA#test_1', 'TestA#test_2'], 2000.0, test_count: 2),
       tests[2], # Individual test TestB#test_1
-      CI::Queue::TestChunk.new('TestC:chunk_0', 'TestC', ['TestC#test_1', 'TestC#test_2', 'TestC#test_3'], 3000.0, test_count: 3),
+      CI::Queue::TestChunk.new('TestC:chunk_0', 'TestC', ['TestC#test_1', 'TestC#test_2', 'TestC#test_3'], 3000.0,
+                               test_count: 3)
     ]
 
     @worker.stub(:reorder_tests, chunks) do
@@ -163,7 +166,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       'build:42:processed',
       'build:42:worker:1:queue',
       'build:42:owners',
-      'build:42:test-group-timeout', # 6th key for dynamic deadline
+      'build:42:test-group-timeout' # 6th key for dynamic deadline
     ]
 
     @worker.stub(:eval_script, proc { |script, keys:, argv:|
@@ -191,7 +194,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       'build:42:completed',
       'build:42:worker:1:queue',
       'build:42:owners',
-      'build:42:test-group-timeout', # 5th key for dynamic deadline
+      'build:42:test-group-timeout' # 5th key for dynamic deadline
     ]
 
     @worker.stub(:eval_script, proc { |script, keys:, argv:|
@@ -241,7 +244,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     worker2 = CI::Queue::Redis.new(@redis_url, worker2_config)
 
     lost_test = worker2.send(:try_to_reserve_lost_test)
-    assert_nil lost_test, "Chunk should not be marked as lost before dynamic timeout"
+    assert_nil lost_test, 'Chunk should not be marked as lost before dynamic timeout'
   end
 
   def test_single_test_marked_lost_after_default_timeout
@@ -249,7 +252,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     config = CI::Queue::Configuration.new(
       build_id: 'single-timeout-test',
       worker_id: '1',
-      timeout: 0.5, # 0.5 seconds
+      timeout: 0.5 # 0.5 seconds
     )
 
     worker1 = CI::Queue::Redis.new(@redis_url, config)
@@ -274,7 +277,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     worker2 = CI::Queue::Redis.new(@redis_url, worker2_config)
 
     lost_test = worker2.send(:try_to_reserve_lost_test)
-    assert_equal 'TestA#test_1', lost_test, "Single test should be marked as lost after default timeout"
+    assert_equal 'TestA#test_1', lost_test, 'Single test should be marked as lost after default timeout'
   end
 
   def test_batching_with_many_chunks

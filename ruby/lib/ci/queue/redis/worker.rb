@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require 'ci/queue/static'
 require 'set'
 
@@ -67,7 +68,7 @@ module CI
         end
 
         def idle?
-          !(@idle_since.nil?)
+          !@idle_since.nil?
         end
 
         def poll
@@ -95,7 +96,7 @@ module CI
                 puts "  Running tests: #{running_tests.size}. #{running_tests}"
                 puts "  Owners: #{redis.hgetall(key('owners'))}"
                 unless running_tests.empty?
-                  puts "  Checking if running tests are in processed set:"
+                  puts '  Checking if running tests are in processed set:'
                   running_tests.each do |test, _score|
                     puts "    #{test}: #{redis.sismember(key('processed'), test)}"
                   end
@@ -147,25 +148,25 @@ module CI
           # Accept either an object with .id or a string ID
           test_key = test_or_id.respond_to?(:id) ? test_or_id.id : test_or_id
           raise_on_mismatching_test(test_key)
-          
+
           max_retries = 5
           retry_count = 0
-          
+
           begin
             eval_script(
               :acknowledge,
               keys: [key('running'), key('processed'), key('owners')],
-              argv: [test_key],
+              argv: [test_key]
             ) == 1
           rescue StandardError => e
             retry_count += 1
             if retry_count < max_retries
               # Exponential backoff: 1s, 2s, ...
-              sleep(0.1 * (2 ** (retry_count - 1)))
+              sleep(0.1 * (2**(retry_count - 1)))
               retry
             else
               warn("Failed to acknowledge test #{test_key.inspect} after #{max_retries} retries: #{e.class} - #{e.message}. " \
-                   "Test remains in running set and may be picked up by reserve_lost after timeout.")
+                   'Test remains in running set and may be picked up by reserve_lost after timeout.')
               raise
             end
           end
@@ -184,9 +185,9 @@ module CI
               key('queue'),
               key('running'),
               key('worker', worker_id, 'queue'),
-              key('owners'),
+              key('owners')
             ],
-            argv: [config.max_requeues, global_max_requeues, test_key, offset],
+            argv: [config.max_requeues, global_max_requeues, test_key, offset]
           ) == 1
 
           @reserved_test = test_key unless requeued || skip_reservation_check
@@ -197,7 +198,7 @@ module CI
           eval_script(
             :release,
             keys: [key('running'), key('worker', worker_id, 'queue'), key('owners')],
-            argv: [],
+            argv: []
           )
           nil
         end
@@ -215,20 +216,20 @@ module CI
         end
 
         def raise_on_mismatching_test(test)
-          if @reserved_test == test
-            @reserved_test = nil
-          else
+          unless @reserved_test == test
             raise ReservationError, "Acknowledged #{test.inspect} but #{@reserved_test.inspect} was reserved"
           end
+
+          @reserved_test = nil
         end
 
         def reserve
           if @reserved_test
             raise ReservationError, "#{@reserved_test.inspect} is already reserved. " \
-              "You have to acknowledge it before you can reserve another one"
+              'You have to acknowledge it before you can reserve another one'
           end
 
-          @reserved_test = (try_to_reserve_lost_test || try_to_reserve_test)
+          @reserved_test = try_to_reserve_lost_test || try_to_reserve_test
         end
 
         def try_to_reserve_test
@@ -240,9 +241,9 @@ module CI
               key('processed'),
               key('worker', worker_id, 'queue'),
               key('owners'),
-              key('test-group-timeout'),
+              key('test-group-timeout')
             ],
-            argv: [CI::Queue.time_now.to_f, 'true', config.timeout],
+            argv: [CI::Queue.time_now.to_f, 'true', config.timeout]
           )
         end
 
@@ -254,20 +255,18 @@ module CI
               key('completed'),
               key('worker', worker_id, 'queue'),
               key('owners'),
-              key('test-group-timeout'),
+              key('test-group-timeout')
             ],
-            argv: [CI::Queue.time_now.to_f, timeout, 'true', config.timeout],
+            argv: [CI::Queue.time_now.to_f, timeout, 'true', config.timeout]
           )
 
           if lost_test.nil? && idle?
             puts "Worker #{worker_id} could not reserve a lost test while idle"
-            puts "Printing running tests:"
+            puts 'Printing running tests:'
             puts "#{redis.zrange(key('running'), 0, -1, withscores: true)}"
           end
 
-          if lost_test
-            build.record_warning(Warnings::RESERVED_LOST_TEST, test: lost_test, timeout: timeout)
-          end
+          build.record_warning(Warnings::RESERVED_LOST_TEST, test: lost_test, timeout: timeout) if lost_test
 
           lost_test
         end
@@ -293,8 +292,6 @@ module CI
         def register
           redis.sadd(key('workers'), [worker_id])
         end
-
-        private
 
         def acquire_master_role?
           return true if @master
