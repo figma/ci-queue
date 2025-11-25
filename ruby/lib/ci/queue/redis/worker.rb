@@ -73,6 +73,12 @@ module CI
 
         def poll
           wait_for_master
+          if master?
+            warn "Worker #{worker_id} is the master"
+          else
+            master_id = master_worker_id
+            warn "Worker #{worker_id} saw master worker: #{master_id}" if master_id
+          end
           idle_since = nil
           idle_state_printed = false
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
@@ -233,7 +239,8 @@ module CI
         end
 
         def try_to_reserve_test
-          eval_script(
+          current_time = CI::Queue.time_now.to_f
+          test_id = eval_script(
             :reserve,
             keys: [
               key('queue'),
@@ -243,11 +250,42 @@ module CI
               key('owners'),
               key('test-group-timeout')
             ],
-            argv: [CI::Queue.time_now.to_f, 'true', config.timeout]
+            argv: [current_time, 'true', config.timeout]
           )
+
+          if test_id
+            # Check what timeout was used (dynamic or default)
+            dynamic_timeout = redis.hget(key('test-group-timeout'), test_id)
+            timeout_used = dynamic_timeout ? dynamic_timeout.to_f : config.timeout
+            deadline = current_time + timeout_used
+            gap_seconds = timeout_used
+            gap_hours = (gap_seconds / 3600).to_i
+            gap_mins = ((gap_seconds % 3600) / 60).to_i
+            gap_secs = (gap_seconds % 60)
+
+            current_time_readable = Time.at(current_time).strftime('%Y-%m-%d %H:%M:%S')
+            deadline_readable = Time.at(deadline).strftime('%Y-%m-%d %H:%M:%S')
+
+            # Format gap_seconds to 2 decimal places, and gap_secs for the formatted version
+            gap_seconds_formatted = format('%.2f', gap_seconds)
+            gap_secs_formatted = gap_secs < 60 ? format('%.2f', gap_secs) : gap_secs.to_i.to_s
+
+            # Add details about how timeout was computed
+            timeout_details = if dynamic_timeout
+                                test_count = (dynamic_timeout.to_f / config.timeout).round
+                                "dynamic_timeout=#{dynamic_timeout.to_f}s (config.timeout=#{config.timeout}s * chunk.test_count=#{test_count})"
+                              else
+                                "default_timeout=#{config.timeout}s"
+                              end
+
+            warn "[reserve] test=#{test_id} current_time=#{current_time_readable} (#{current_time}) deadline=#{deadline_readable} (#{deadline}) gap=#{gap_seconds_formatted}s (#{gap_hours}h#{gap_mins}m#{gap_secs_formatted}s) [#{timeout_details}]"
+          end
+
+          test_id
         end
 
         def try_to_reserve_lost_test
+          current_time = CI::Queue.time_now.to_f
           lost_test = eval_script(
             :reserve_lost,
             keys: [
@@ -257,13 +295,41 @@ module CI
               key('owners'),
               key('test-group-timeout')
             ],
-            argv: [CI::Queue.time_now.to_f, timeout, 'true', config.timeout]
+            argv: [current_time, timeout, 'true', config.timeout]
           )
 
+          if lost_test
+            # Check what timeout was used (dynamic or default)
+            dynamic_timeout = redis.hget(key('test-group-timeout'), lost_test)
+            timeout_used = dynamic_timeout ? dynamic_timeout.to_f : config.timeout
+            deadline = current_time + timeout_used
+            gap_seconds = timeout_used
+            gap_hours = (gap_seconds / 3600).to_i
+            gap_mins = ((gap_seconds % 3600) / 60).to_i
+            gap_secs = (gap_seconds % 60)
+
+            current_time_readable = Time.at(current_time).strftime('%Y-%m-%d %H:%M:%S')
+            deadline_readable = Time.at(deadline).strftime('%Y-%m-%d %H:%M:%S')
+
+            # Format gap_seconds to 2 decimal places, and gap_secs for the formatted version
+            gap_seconds_formatted = format('%.2f', gap_seconds)
+            gap_secs_formatted = gap_secs < 60 ? format('%.2f', gap_secs) : gap_secs.to_i.to_s
+
+            # Add details about how timeout was computed
+            timeout_details = if dynamic_timeout
+                                test_count = (dynamic_timeout.to_f / config.timeout).round
+                                "dynamic_timeout=#{dynamic_timeout.to_f}s (config.timeout=#{config.timeout}s * chunk.test_count=#{test_count})"
+                              else
+                                "default_timeout=#{config.timeout}s"
+                              end
+
+            warn "[reserve_lost] test=#{lost_test} current_time=#{current_time_readable} (#{current_time}) deadline=#{deadline_readable} (#{deadline}) gap=#{gap_seconds_formatted}s (#{gap_hours}h#{gap_mins}m#{gap_secs_formatted}s) [#{timeout_details}]"
+          end
+
           if lost_test.nil? && idle?
-            puts "Worker #{worker_id} could not reserve a lost test while idle"
-            puts 'Printing running tests:'
-            puts "#{redis.zrange(key('running'), 0, -1, withscores: true)}"
+            warn "Worker #{worker_id} could not reserve a lost test while idle"
+            warn 'Printing running tests:'
+            warn "#{redis.zrange(key('running'), 0, -1, withscores: true)}"
           end
 
           build.record_warning(Warnings::RESERVED_LOST_TEST, test: lost_test, timeout: timeout) if lost_test
@@ -296,10 +362,24 @@ module CI
         def acquire_master_role?
           return true if @master
 
-          @master = redis.setnx(key('master-status'), 'setup')
-        rescue *CONNECTION_ERRORS
-          @master = nil
-          false
+          begin
+            @master = redis.setnx(key('master-status'), 'setup')
+            if @master
+              begin
+                redis.set(key('master-worker-id'), worker_id)
+                redis.expire(key('master-worker-id'), config.redis_ttl)
+                warn "Worker #{worker_id} elected as master"
+              rescue *CONNECTION_ERRORS
+                # If setting master-worker-id fails, we still have master status
+                # Log but don't lose master role
+                warn("Failed to set master-worker-id: #{$!.message}")
+              end
+            end
+            @master
+          rescue *CONNECTION_ERRORS
+            @master = nil
+            false
+          end
         end
 
         def register_worker_presence
@@ -336,6 +416,10 @@ module CI
               transaction.expire(key('test-group-timeout'), config.redis_ttl)
             end
           end
+        rescue *CONNECTION_ERRORS => e
+          raise if master?
+
+          warn("Failed to store chunk metadata: #{e.message}")
         end
 
         def chunk_id?(id)
