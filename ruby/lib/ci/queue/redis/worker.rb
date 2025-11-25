@@ -73,6 +73,12 @@ module CI
 
         def poll
           wait_for_master
+          if master?
+            warn "Worker #{worker_id} is the master"
+          else
+            master_id = master_worker_id
+            warn "Worker #{worker_id} saw master worker: #{master_id}" if master_id
+          end
           idle_since = nil
           idle_state_printed = false
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
@@ -297,6 +303,18 @@ module CI
           return true if @master
 
           @master = redis.setnx(key('master-status'), 'setup')
+          if @master
+            begin
+              redis.set(key('master-worker-id'), worker_id)
+              redis.expire(key('master-worker-id'), config.redis_ttl)
+              warn "Worker #{worker_id} elected as master"
+            rescue *CONNECTION_ERRORS
+              # If setting master-worker-id fails, we still have master status
+              # Log but don't lose master role
+              warn("Failed to set master-worker-id: #{$!.message}")
+            end
+          end
+          @master
         rescue *CONNECTION_ERRORS
           @master = nil
           false
