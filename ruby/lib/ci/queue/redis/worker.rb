@@ -147,11 +147,28 @@ module CI
           # Accept either an object with .id or a string ID
           test_key = test_or_id.respond_to?(:id) ? test_or_id.id : test_or_id
           raise_on_mismatching_test(test_key)
-          eval_script(
-            :acknowledge,
-            keys: [key('running'), key('processed'), key('owners')],
-            argv: [test_key],
-          ) == 1
+          
+          max_retries = 5
+          retry_count = 0
+          
+          begin
+            eval_script(
+              :acknowledge,
+              keys: [key('running'), key('processed'), key('owners')],
+              argv: [test_key],
+            ) == 1
+          rescue StandardError => e
+            retry_count += 1
+            if retry_count < max_retries
+              # Exponential backoff: 1s, 2s, ...
+              sleep(0.1 * (2 ** (retry_count - 1)))
+              retry
+            else
+              warn("Failed to acknowledge test #{test_key.inspect} after #{max_retries} retries: #{e.class} - #{e.message}. " \
+                   "Test remains in running set and may be picked up by reserve_lost after timeout.")
+              raise
+            end
+          end
         end
 
         def requeue(test, offset: Redis.requeue_offset, skip_reservation_check: false)
