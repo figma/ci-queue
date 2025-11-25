@@ -239,7 +239,8 @@ module CI
         end
 
         def try_to_reserve_test
-          eval_script(
+          current_time = CI::Queue.time_now.to_f
+          test_id = eval_script(
             :reserve,
             keys: [
               key('queue'),
@@ -249,11 +250,44 @@ module CI
               key('owners'),
               key('test-group-timeout')
             ],
-            argv: [CI::Queue.time_now.to_f, 'true', config.timeout]
+            argv: [current_time, 'true', config.timeout]
           )
+
+          if test_id
+            # Check what timeout was used (dynamic or default)
+            dynamic_timeout = redis.hget(key('test-group-timeout'), test_id)
+            timeout_used = dynamic_timeout ? dynamic_timeout.to_f : config.timeout
+            deadline = current_time + timeout_used
+            gap_seconds = timeout_used
+            gap_hours = (gap_seconds / 3600).to_i
+            gap_mins = ((gap_seconds % 3600) / 60).to_i
+            gap_secs = (gap_seconds % 60)
+
+            current_time_readable = Time.at(current_time).strftime('%Y-%m-%d %H:%M:%S')
+            deadline_readable = Time.at(deadline).strftime('%Y-%m-%d %H:%M:%S')
+
+            # Format gap_seconds to 2 decimal places, and gap_secs for the formatted version
+            gap_seconds_formatted = format('%.2f', gap_seconds)
+            gap_secs_formatted = gap_secs < 60 ? format('%.2f', gap_secs) : gap_secs.to_i.to_s
+
+            # Add details about how timeout was computed
+            timeout_details = if dynamic_timeout
+                                # For chunks, calculate back to estimated_duration (without buffer)
+                                estimated_duration_ms = (dynamic_timeout.to_f / 1.1 * 1000).round
+                                estimated_duration_seconds = estimated_duration_ms / 1000.0
+                                "dynamic_timeout=#{dynamic_timeout.to_f}s (estimated_duration=#{estimated_duration_seconds}s * 1.1 buffer)"
+                              else
+                                "default_timeout=#{config.timeout}s"
+                              end
+
+            warn "[reserve] test=#{test_id} current_time=#{current_time_readable} (#{current_time}) deadline=#{deadline_readable} (#{deadline}) gap=#{gap_seconds_formatted}s (#{gap_hours}h#{gap_mins}m#{gap_secs_formatted}s) [#{timeout_details}]"
+          end
+
+          test_id
         end
 
         def try_to_reserve_lost_test
+          current_time = CI::Queue.time_now.to_f
           lost_test = eval_script(
             :reserve_lost,
             keys: [
@@ -263,8 +297,38 @@ module CI
               key('owners'),
               key('test-group-timeout')
             ],
-            argv: [CI::Queue.time_now.to_f, timeout, 'true', config.timeout]
+            argv: [current_time, timeout, 'true', config.timeout]
           )
+
+          if lost_test
+            # Check what timeout was used (dynamic or default)
+            dynamic_timeout = redis.hget(key('test-group-timeout'), lost_test)
+            timeout_used = dynamic_timeout ? dynamic_timeout.to_f : config.timeout
+            deadline = current_time + timeout_used
+            gap_seconds = timeout_used
+            gap_hours = (gap_seconds / 3600).to_i
+            gap_mins = ((gap_seconds % 3600) / 60).to_i
+            gap_secs = (gap_seconds % 60)
+
+            current_time_readable = Time.at(current_time).strftime('%Y-%m-%d %H:%M:%S')
+            deadline_readable = Time.at(deadline).strftime('%Y-%m-%d %H:%M:%S')
+
+            # Format gap_seconds to 2 decimal places, and gap_secs for the formatted version
+            gap_seconds_formatted = format('%.2f', gap_seconds)
+            gap_secs_formatted = gap_secs < 60 ? format('%.2f', gap_secs) : gap_secs.to_i.to_s
+
+            # Add details about how timeout was computed
+            timeout_details = if dynamic_timeout
+                                # For chunks, calculate back to estimated_duration (without buffer)
+                                estimated_duration_ms = (dynamic_timeout.to_f / 1.1 * 1000).round
+                                estimated_duration_seconds = estimated_duration_ms / 1000.0
+                                "dynamic_timeout=#{dynamic_timeout.to_f}s (estimated_duration=#{estimated_duration_seconds}s * 1.1 buffer)"
+                              else
+                                "default_timeout=#{config.timeout}s"
+                              end
+
+            warn "[reserve_lost] test=#{lost_test} current_time=#{current_time_readable} (#{current_time}) deadline=#{deadline_readable} (#{deadline}) gap=#{gap_seconds_formatted}s (#{gap_hours}h#{gap_mins}m#{gap_secs_formatted}s) [#{timeout_details}]"
+          end
 
           if lost_test.nil? && idle?
             puts "Worker #{worker_id} could not reserve a lost test while idle"
@@ -346,9 +410,14 @@ module CI
                 transaction.sadd(key('chunks'), chunk.id)
 
                 # Store dynamic timeout for this chunk
-                # Timeout = default_timeout * number_of_tests
-                chunk_timeout = config.timeout * chunk.test_count
-                transaction.hset(key('test-group-timeout'), chunk.id, chunk_timeout)
+                # Timeout = estimated_duration (in ms) converted to seconds + buffer
+                # estimated_duration is in milliseconds, convert to seconds and add 10% buffer
+                buffer_percent = 10
+                estimated_duration_seconds = chunk.estimated_duration / 1000.0
+                chunk_timeout = (estimated_duration_seconds * (1 + buffer_percent / 100.0)).round(2)
+                # Format to string to avoid floating point precision issues in Redis
+                # Use %g to remove trailing zeros
+                transaction.hset(key('test-group-timeout'), chunk.id, format('%g', chunk_timeout))
               end
               transaction.expire(key('chunks'), config.redis_ttl)
               transaction.expire(key('test-group-timeout'), config.redis_ttl)
