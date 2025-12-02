@@ -4,10 +4,11 @@ module CI
   module Queue
     module Redis
       class UpdateTestDurationMovingAverage
-        def initialize(redis, key: "test_duration_moving_averages", smoothing_factor: 0.2)
+        def initialize(redis, key: 'test_duration_moving_averages', smoothing_factor: 0.2, slow_smoothing_factor: 0.01)
           @redis = redis
           @key = key
           @smoothing_factor = smoothing_factor
+          @slow_smoothing_factor = slow_smoothing_factor
         end
 
         def update_batch(pairs)
@@ -20,10 +21,13 @@ module CI
           pairs.each_with_index do |(test_id, duration), idx|
             current = current_values[idx]
             new_avg = if current
-              @smoothing_factor * duration + (1 - @smoothing_factor) * current.to_f
-            else
-              duration
-            end
+                        current_avg = current.to_f
+                        # Use slow smoothing if new duration is faster (shorter), fast smoothing if slower (longer)
+                        factor = duration < current_avg ? @slow_smoothing_factor : @smoothing_factor
+                        factor * duration + (1 - factor) * current_avg
+                      else
+                        duration
+                      end
             writes << [test_id, new_avg]
           end
 
