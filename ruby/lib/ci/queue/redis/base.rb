@@ -122,6 +122,14 @@ module CI
           @scripts_cache[script] ||= redis.script(:load, read_script(script))
         end
 
+        def ensure_connection_and_script(script)
+          # Pre-initialize Redis connection and script in current thread context
+          # This ensures background threads use the same initialized connection
+          load_script(script)
+          # Ping Redis to ensure connection is established
+          redis.ping
+        end
+
         def read_script(name)
           ::File.read(::File.join(CI::Queue::DEV_SCRIPTS_ROOT, "#{name}.lua"))
         rescue SystemCallError

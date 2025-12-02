@@ -10,8 +10,17 @@ local global_max_requeues = tonumber(ARGV[2])
 local test = ARGV[3]
 local offset = ARGV[4]
 
-if redis.call('hget', owners_key, test) == worker_queue_key then
-   redis.call('hdel', owners_key, test)
+local owner_value = redis.call('hget', owners_key, test)
+if owner_value then
+  -- Parse owner value: format is "worker_queue_key|heartbeat_timestamp"
+  local pipe_pos = string.find(owner_value, "|")
+  if pipe_pos then
+    local stored_worker_key = string.sub(owner_value, 1, pipe_pos - 1)
+    
+    if stored_worker_key == worker_queue_key then
+      redis.call('hdel', owners_key, test)
+    end
+  end
 end
 
 if redis.call('sismember', processed_key, test) == 1 then

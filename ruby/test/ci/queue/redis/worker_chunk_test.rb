@@ -161,9 +161,11 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
   def test_acknowledge_chunk
     # Set up a chunk as if it were reserved (in running zset)
+    # Format: "worker_queue_key|initial_reservation_time|last_heartbeat_time"
     chunk_id = 'TestA:chunk_0'
-    @redis.zadd('build:42:running', Time.now.to_i, chunk_id)
-    @redis.hset('build:42:owners', chunk_id, 'build:42:worker:1:queue')
+    current_time = Time.now.to_f
+    @redis.zadd('build:42:running', current_time.to_i, chunk_id)
+    @redis.hset('build:42:owners', chunk_id, "build:42:worker:1:queue|#{current_time}|#{current_time}")
     @worker.instance_variable_set(:@reserved_test, chunk_id)
 
     # Acknowledge the chunk

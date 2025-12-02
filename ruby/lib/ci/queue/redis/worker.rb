@@ -87,7 +87,37 @@ module CI
               executable = resolve_executable(id)
 
               if executable
-                yield executable
+                # Pre-initialize Redis connection and heartbeat script in main thread
+                # to ensure background thread uses the same initialized context
+                ensure_connection_and_script(:heartbeat)
+
+                # Start heartbeat thread to extend lease while executing
+                heartbeat_thread = nil
+                begin
+                  heartbeat_thread = Thread.new do
+                    heartbeat_interval = 10 # Send heartbeat every 10 seconds
+                    loop do
+                      break if Thread.current[:stop]
+
+                      sleep heartbeat_interval
+
+                      break if Thread.current[:stop]
+
+                      heartbeat(id)
+                    end
+                  end
+                  heartbeat_thread[:stop] = false
+
+                  yield executable
+                ensure
+                  # Stop heartbeat thread when execution completes
+                  # This ensures it's stopped after acknowledge has completed
+                  if heartbeat_thread
+                    heartbeat_thread[:stop] = true
+                    heartbeat_thread.wakeup # Interrupt sleep if thread is sleeping
+                    heartbeat_thread.join(2) # Wait up to 2 seconds for thread to finish
+                  end
+                end
               else
                 warn("Warning: Could not resolve executable for ID #{id.inspect}. Acknowledging to remove from queue.")
                 acknowledge(id)
@@ -207,6 +237,32 @@ module CI
             argv: []
           )
           nil
+        end
+
+        def heartbeat(test_id)
+          current_time = CI::Queue.time_now.to_f
+          result = eval_script(
+            :heartbeat,
+            keys: [
+              key('running'),
+              key('processed'),
+              key('owners'),
+              key('worker', worker_id, 'queue'),
+              key('test-group-timeout')
+            ],
+            argv: [current_time, test_id, config.timeout]
+          )
+          if result.is_a?(Array) && result.size == 2
+            old_deadline = result[0]
+            new_deadline = result[1]
+            old_deadline_readable = Time.at(old_deadline).strftime('%Y-%m-%d %H:%M:%S')
+            new_deadline_readable = Time.at(new_deadline).strftime('%Y-%m-%d %H:%M:%S')
+            warn("[heartbeat] Extended deadline for #{test_id.inspect} from #{old_deadline_readable} (#{old_deadline}) to #{new_deadline_readable} (#{new_deadline})")
+          end
+          result
+        rescue *CONNECTION_ERRORS => e
+          warn("Failed to send heartbeat for #{test_id.inspect}: #{e.class} - #{e.message}")
+          false
         end
 
         private

@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require 'test_helper'
 
 class CI::Queue::RedisTest < Minitest::Test
@@ -28,7 +29,7 @@ class CI::Queue::RedisTest < Minitest::Test
     previous_offset = CI::Queue::Redis.requeue_offset
     CI::Queue::Redis.requeue_offset = 2
     failed_once = false
-    test_order = poll(@queue, ->(test) {
+    test_order = poll(@queue, lambda { |test|
       if test == shuffled_test_list.last && !failed_once
         failed_once = true
         false
@@ -158,6 +159,7 @@ class CI::Queue::RedisTest < Minitest::Test
 
     poll(@queue, false) do
       break if acquired
+
       acquired = true
       monitor.synchronize do
         condition.signal
@@ -188,6 +190,7 @@ class CI::Queue::RedisTest < Minitest::Test
 
     @queue.poll do |test|
       break if acquired
+
       acquired = true
       monitor.synchronize do
         condition.signal
@@ -200,31 +203,29 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def test_workers_register
-    assert_equal 1, @redis.scard(('build:42:workers'))
+    assert_equal 1, @redis.scard('build:42:workers')
     worker(2)
-    assert_equal 2, @redis.scard(('build:42:workers'))
+    assert_equal 2, @redis.scard('build:42:workers')
   end
 
   def test_timeout_warning
-    begin
-      threads = 2.times.map do |i|
-        Thread.new do
-          queue = worker(i, tests: [TEST_LIST.first], build_id: '24')
-          queue.poll do |test|
-            sleep 1 # timeout
-            queue.acknowledge(test)
-          end
+    threads = 2.times.map do |i|
+      Thread.new do
+        queue = worker(i, tests: [TEST_LIST.first], build_id: '24')
+        queue.poll do |test|
+          sleep 1 # timeout
+          queue.acknowledge(test)
         end
       end
-
-      threads.each { |t| t.join(3) }
-      threads.each { |t| refute_predicate t, :alive? }
-
-      queue = worker(12, build_id: '24')
-      assert_equal [[:RESERVED_LOST_TEST, {test: 'ATest#test_foo', timeout: 0.2}]], queue.build.pop_warnings
-    ensure
-      threads.each(&:kill)
     end
+
+    threads.each { |t| t.join(3) }
+    threads.each { |t| refute_predicate t, :alive? }
+
+    queue = worker(12, build_id: '24')
+    assert_equal [[:RESERVED_LOST_TEST, { test: 'ATest#test_foo', timeout: 0.2 }]], queue.build.pop_warnings
+  ensure
+    threads.each(&:kill)
   end
 
   def test_continuously_timing_out_tests
@@ -262,9 +263,9 @@ class CI::Queue::RedisTest < Minitest::Test
     tests = (1..10).map { |i| MockTest.new("ChunkSuite#test_#{i}") }
 
     worker1 = worker(1, tests: tests, build_id: '100', strategy: :suite_bin_packing,
-                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+                        suite_max_duration: 120_000, timing_fallback_duration: 100.0)
     worker2 = worker(2, tests: tests, build_id: '100', strategy: :suite_bin_packing,
-                     suite_max_duration: 120_000, timing_fallback_duration: 100.0, populate: false)
+                        suite_max_duration: 120_000, timing_fallback_duration: 100.0, populate: false)
 
     acquired = false
     worker2_tried = false
@@ -300,7 +301,7 @@ class CI::Queue::RedisTest < Minitest::Test
     worker1.poll do |test|
       reserved_test = test
       refute_nil reserved_test
-      assert reserved_test.respond_to?(:chunk?) && reserved_test.chunk?, "Expected a chunk to be reserved"
+      assert reserved_test.respond_to?(:chunk?) && reserved_test.chunk?, 'Expected a chunk to be reserved'
 
       # Signal worker2 to try stealing, then wait for it to finish trying
       acquired = true
@@ -314,7 +315,7 @@ class CI::Queue::RedisTest < Minitest::Test
       break
     end
 
-    refute worker2_got_test, "Worker 2 should not steal chunk before dynamic timeout expires"
+    refute worker2_got_test, 'Worker 2 should not steal chunk before dynamic timeout expires'
   end
 
   def test_chunk_with_dynamic_timeout_picked_up_after_timeout
@@ -323,9 +324,9 @@ class CI::Queue::RedisTest < Minitest::Test
     tests = (1..5).map { |i| MockTest.new("TimeoutSuite#test_#{i}") }
 
     worker1 = worker(1, tests: tests, build_id: '101', strategy: :suite_bin_packing,
-                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+                        suite_max_duration: 120_000, timing_fallback_duration: 100.0)
     worker2 = worker(2, tests: tests, build_id: '101', strategy: :suite_bin_packing,
-                     suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+                        suite_max_duration: 120_000, timing_fallback_duration: 100.0)
 
     acquired = false
     done = false
@@ -334,13 +335,11 @@ class CI::Queue::RedisTest < Minitest::Test
     monitor = Monitor.new
     condition = monitor.new_cond
 
-    # Worker 2 thread: waits for worker1 to acquire, then waits for timeout and steals
+    # Worker 2 thread: waits for worker1 to acquire, then steals after heartbeat is set to old
     Thread.start do
       monitor.synchronize do
         condition.wait_until { acquired }
-        # Wait longer than dynamic timeout (1.2s > 1.0s)
-        sleep 1.2
-        # Now poll - should successfully steal the timed-out chunk
+        # Now poll - should successfully steal the chunk (heartbeat was set to old)
         worker2.poll do |test|
           stolen_test = test
           worker2.acknowledge(test)
@@ -355,9 +354,18 @@ class CI::Queue::RedisTest < Minitest::Test
     worker1.poll do |test|
       reserved_test = test
       refute_nil reserved_test
-      assert reserved_test.respond_to?(:chunk?) && reserved_test.chunk?, "Expected a chunk to be reserved"
+      assert reserved_test.respond_to?(:chunk?) && reserved_test.chunk?, 'Expected a chunk to be reserved'
 
-      # Signal worker2 to start waiting, then wait for it to steal the chunk
+      # Set heartbeat to be old (> 2 minutes) so worker2 can steal it
+      # Format: "worker_queue_key|initial_reservation_time|last_heartbeat_time"
+      current_time = CI::Queue.time_now.to_f
+      old_heartbeat_time = current_time - 130 # 130 seconds ago (more than 2 minutes)
+      initial_reservation_time = current_time - 140
+      worker_queue_key = 'build:101:worker:1:queue'
+      owner_value = "#{worker_queue_key}|#{initial_reservation_time}|#{old_heartbeat_time}"
+      @redis.hset('build:101:owners', reserved_test.id, owner_value)
+
+      # Signal worker2 to start stealing
       acquired = true
       monitor.synchronize do
         condition.signal
@@ -366,7 +374,7 @@ class CI::Queue::RedisTest < Minitest::Test
       break
     end
 
-    refute_nil stolen_test, "Worker 2 should pick up chunk after dynamic timeout expires"
+    refute_nil stolen_test, 'Worker 2 should pick up chunk after heartbeat expires'
     assert_equal reserved_test.id, stolen_test.id
 
     # Verify the RESERVED_LOST_TEST warning was recorded
@@ -376,14 +384,14 @@ class CI::Queue::RedisTest < Minitest::Test
   end
 
   def test_individual_test_uses_default_timeout_after_requeue
-    # Test that individual tests (not in chunks) use the default timeout
+    # Test that individual tests (not in chunks) can be stolen after heartbeat expires
     @redis.flushdb
 
     # Create individual tests from different suites (won't be chunked together)
     tests = [
-      MockTest.new("SuiteA#test_1"),
-      MockTest.new("SuiteB#test_1"),
-      MockTest.new("SuiteC#test_1")
+      MockTest.new('SuiteA#test_1'),
+      MockTest.new('SuiteB#test_1'),
+      MockTest.new('SuiteC#test_1')
     ]
 
     worker1 = worker(1, tests: tests, build_id: '102', timeout: 0.2)
@@ -396,13 +404,11 @@ class CI::Queue::RedisTest < Minitest::Test
     monitor = Monitor.new
     condition = monitor.new_cond
 
-    # Worker 2 thread: waits for worker1 to acquire, then waits for default timeout and steals
+    # Worker 2 thread: waits for worker1 to acquire, then steals after heartbeat is set to old
     Thread.start do
       monitor.synchronize do
         condition.wait_until { acquired }
-        # Wait for default timeout (0.3s > 0.2s default)
-        sleep 0.3
-        # Now poll - should successfully steal the timed-out test
+        # Now poll - should successfully steal the test (heartbeat was set to old)
         worker2.poll do |test|
           stolen_test = test
           worker2.acknowledge(test)
@@ -417,9 +423,18 @@ class CI::Queue::RedisTest < Minitest::Test
     worker1.poll do |test|
       reserved_test = test
       refute_nil reserved_test
-      refute (reserved_test.respond_to?(:chunk?) && reserved_test.chunk?), "Expected an individual test, not a chunk"
+      refute (reserved_test.respond_to?(:chunk?) && reserved_test.chunk?), 'Expected an individual test, not a chunk'
 
-      # Signal worker2 to start waiting, then wait for it to steal the test
+      # Set heartbeat to be old (> 2 minutes) so worker2 can steal it
+      # Format: "worker_queue_key|initial_reservation_time|last_heartbeat_time"
+      current_time = CI::Queue.time_now.to_f
+      old_heartbeat_time = current_time - 130 # 130 seconds ago (more than 2 minutes)
+      initial_reservation_time = current_time - 140
+      worker_queue_key = 'build:102:worker:1:queue'
+      owner_value = "#{worker_queue_key}|#{initial_reservation_time}|#{old_heartbeat_time}"
+      @redis.hset('build:102:owners', reserved_test.id, owner_value)
+
+      # Signal worker2 to start stealing
       acquired = true
       monitor.synchronize do
         condition.signal
@@ -428,7 +443,7 @@ class CI::Queue::RedisTest < Minitest::Test
       break
     end
 
-    refute_nil stolen_test, "Worker 2 should steal individual test after default timeout"
+    refute_nil stolen_test, 'Worker 2 should steal individual test after heartbeat expires'
     assert_equal reserved_test.id, stolen_test.id
   end
 
@@ -436,7 +451,7 @@ class CI::Queue::RedisTest < Minitest::Test
     @redis.flushdb
 
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update_batch([["TestSuite#test_1", 5000.0], ["TestSuite#test_2", 3000.0]])
+    updater.update_batch([['TestSuite#test_1', 5000.0], ['TestSuite#test_2', 3000.0]])
 
     tests = [
       MockTest.new('TestSuite#test_1'),
@@ -444,7 +459,7 @@ class CI::Queue::RedisTest < Minitest::Test
     ]
 
     worker = worker(1, tests: tests, build_id: '200', strategy: :suite_bin_packing,
-                    suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+                       suite_max_duration: 120_000, timing_fallback_duration: 100.0)
 
     chunks = []
     worker.poll do |chunk|
@@ -454,7 +469,7 @@ class CI::Queue::RedisTest < Minitest::Test
 
     assert_equal 1, chunks.size
     chunk = chunks.first
-    assert chunk.chunk?, "Expected a chunk"
+    assert chunk.chunk?, 'Expected a chunk'
     assert_equal 'TestSuite:chunk_0', chunk.id
     assert_equal 8000.0, chunk.estimated_duration
   end
@@ -466,7 +481,7 @@ class CI::Queue::RedisTest < Minitest::Test
     timing_data = { 'TestSuite#test_1' => 10_000.0 }
 
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update_batch([["TestSuite#test_1", 2000.0]])
+    updater.update_batch([['TestSuite#test_1', 2000.0]])
 
     tests = [MockTest.new('TestSuite#test_1')]
 
@@ -475,8 +490,8 @@ class CI::Queue::RedisTest < Minitest::Test
       file.close
 
       worker = worker(1, tests: tests, build_id: '201', strategy: :suite_bin_packing,
-                      suite_max_duration: 120_000, timing_fallback_duration: 100.0,
-                      timing_file: file.path)
+                         suite_max_duration: 120_000, timing_fallback_duration: 100.0,
+                         timing_file: file.path)
 
       chunks = []
       worker.poll do |chunk|
@@ -501,8 +516,8 @@ class CI::Queue::RedisTest < Minitest::Test
       file.close
 
       worker = worker(1, tests: tests, build_id: '202', strategy: :suite_bin_packing,
-                      suite_max_duration: 120_000, timing_fallback_duration: 100.0,
-                      timing_file: file.path)
+                         suite_max_duration: 120_000, timing_fallback_duration: 100.0,
+                         timing_file: file.path)
 
       chunks = []
       worker.poll do |chunk|
@@ -521,7 +536,7 @@ class CI::Queue::RedisTest < Minitest::Test
     tests = [MockTest.new('UnknownTest#test_1')]
 
     worker = worker(1, tests: tests, build_id: '203', strategy: :suite_bin_packing,
-                    suite_max_duration: 120_000, timing_fallback_duration: 500.0)
+                       suite_max_duration: 120_000, timing_fallback_duration: 500.0)
 
     chunks = []
     worker.poll do |chunk|
@@ -538,7 +553,7 @@ class CI::Queue::RedisTest < Minitest::Test
     require 'tempfile'
 
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update_batch([["MixedTest#test_1", 60_000.0], ["MixedTest#test_2", 50_000.0]])
+    updater.update_batch([['MixedTest#test_1', 60_000.0], ['MixedTest#test_2', 50_000.0]])
 
     timing_data = {
       'MixedTest#test_3' => 40_000.0,
@@ -557,8 +572,8 @@ class CI::Queue::RedisTest < Minitest::Test
       file.close
 
       worker = worker(1, tests: tests, build_id: '204', strategy: :suite_bin_packing,
-                      suite_max_duration: 120_000, suite_buffer_percent: 10,
-                      timing_fallback_duration: 100.0, timing_file: file.path)
+                         suite_max_duration: 120_000, suite_buffer_percent: 10,
+                         timing_fallback_duration: 100.0, timing_file: file.path)
 
       chunks = []
       worker.poll do |chunk|
@@ -571,7 +586,7 @@ class CI::Queue::RedisTest < Minitest::Test
       effective_max = 120_000 * (1 - 10 / 100.0)
       chunks.each do |chunk|
         assert chunk.estimated_duration <= effective_max,
-          "Chunk duration #{chunk.estimated_duration} exceeds effective max #{effective_max}"
+               "Chunk duration #{chunk.estimated_duration} exceeds effective max #{effective_max}"
       end
     end
   end
@@ -580,7 +595,7 @@ class CI::Queue::RedisTest < Minitest::Test
     @redis.flushdb
 
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update_batch([["FastTest#test_1", 1000.0], ["SlowTest#test_1", 10_000.0], ["MediumTest#test_1", 5000.0]])
+    updater.update_batch([['FastTest#test_1', 1000.0], ['SlowTest#test_1', 10_000.0], ['MediumTest#test_1', 5000.0]])
 
     tests = [
       MockTest.new('FastTest#test_1'),
@@ -589,7 +604,7 @@ class CI::Queue::RedisTest < Minitest::Test
     ]
 
     worker = worker(1, tests: tests, build_id: '205', strategy: :suite_bin_packing,
-                    suite_max_duration: 120_000, timing_fallback_duration: 100.0)
+                       suite_max_duration: 120_000, timing_fallback_duration: 100.0)
 
     chunks = []
     worker.poll do |chunk|
@@ -612,7 +627,7 @@ class CI::Queue::RedisTest < Minitest::Test
 
     # Only one test has moving average data
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update_batch([["PartialTest#test_1", 3000.0]])
+    updater.update_batch([['PartialTest#test_1', 3000.0]])
 
     tests = [
       MockTest.new('PartialTest#test_1'),
@@ -621,7 +636,7 @@ class CI::Queue::RedisTest < Minitest::Test
     ]
 
     worker = worker(1, tests: tests, build_id: '206', strategy: :suite_bin_packing,
-                    suite_max_duration: 120_000, timing_fallback_duration: 500.0)
+                       suite_max_duration: 120_000, timing_fallback_duration: 500.0)
 
     chunks = []
     worker.poll do |chunk|
@@ -638,12 +653,12 @@ class CI::Queue::RedisTest < Minitest::Test
 
     # Manually update moving average as if a previous worker completed the test
     updater = CI::Queue::Redis::UpdateTestDurationMovingAverage.new(@redis)
-    updater.update_batch([["PersistTest#test_1", 5500.0]])
+    updater.update_batch([['PersistTest#test_1', 5500.0]])
 
     # New worker should see the persisted moving average
     tests = [MockTest.new('PersistTest#test_1')]
     worker1 = worker(1, tests: tests, build_id: '207', strategy: :suite_bin_packing,
-                     suite_max_duration: 120_000, timing_fallback_duration: 1000.0)
+                        suite_max_duration: 120_000, timing_fallback_duration: 1000.0)
 
     chunks = []
     worker1.poll do |chunk|
@@ -700,13 +715,11 @@ class CI::Queue::RedisTest < Minitest::Test
         worker_id: id.to_s,
         timeout: 0.2,
         timing_redis_url: @redis_url,
-        **args,
+        **args
       )
     )
-    if skip_populate
-      return queue
-    else
-      populate(queue, tests: tests)
-    end
+    return queue if skip_populate
+
+    populate(queue, tests: tests)
   end
 end

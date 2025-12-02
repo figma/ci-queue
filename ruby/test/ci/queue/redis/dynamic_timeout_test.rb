@@ -268,16 +268,62 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     reserved_id = worker1.send(:try_to_reserve_test)
     assert_equal 'TestA#test_1', reserved_id
 
-    # Wait longer than timeout (0.5s)
+    # Wait longer than timeout (0.5s) but less than 2 minutes
     sleep 0.6
 
-    # Try to reserve with worker2 - should get the lost test
+    # Try to reserve with worker2 - should NOT get the test because heartbeat is recent (< 2 minutes)
     worker2_config = config.dup
     worker2_config.instance_variable_set(:@worker_id, '2')
     worker2 = CI::Queue::Redis.new(@redis_url, worker2_config)
 
     lost_test = worker2.send(:try_to_reserve_lost_test)
-    assert_equal 'TestA#test_1', lost_test, 'Single test should be marked as lost after default timeout'
+    assert_nil lost_test, 'Test should not be marked as lost if heartbeat is recent (< 2 minutes)'
+  end
+
+  def test_single_test_marked_lost_after_heartbeat_expires
+    # Create worker with short timeout
+    config = CI::Queue::Configuration.new(
+      build_id: 'heartbeat-timeout-test',
+      worker_id: '1',
+      timeout: 0.5 # 0.5 seconds
+    )
+
+    worker1 = CI::Queue::Redis.new(@redis_url, config)
+
+    # Populate with single test (no chunk)
+    tests = create_mock_tests(['TestA#test_1'])
+
+    worker1.stub(:reorder_tests, tests) do
+      worker1.populate(tests)
+    end
+
+    # Reserve the test with worker1
+    reserved_id = worker1.send(:try_to_reserve_test)
+    assert_equal 'TestA#test_1', reserved_id
+
+    # Manually set the heartbeat timestamp to be older than 2 minutes
+    # by manipulating Redis directly
+    # Format: "worker_queue_key|initial_reservation_time|last_heartbeat_time"
+    current_time = CI::Queue.time_now.to_f
+    old_heartbeat_time = current_time - 130 # 130 seconds ago (more than 2 minutes)
+    initial_reservation_time = current_time - 140 # Initial reservation was before the heartbeat
+    worker_queue_key = "build:heartbeat-timeout-test:worker:1:queue"
+    owner_value = "#{worker_queue_key}|#{initial_reservation_time}|#{old_heartbeat_time}"
+    @redis.hset('build:heartbeat-timeout-test:owners', 'TestA#test_1', owner_value)
+
+    # Also set the deadline to be in the past so it's considered "lost"
+    @redis.zadd('build:heartbeat-timeout-test:running', current_time - 10, 'TestA#test_1')
+
+    # Wait a bit to ensure time has passed
+    sleep 0.1
+
+    # Try to reserve with worker2 - should get the lost test now
+    worker2_config = config.dup
+    worker2_config.instance_variable_set(:@worker_id, '2')
+    worker2 = CI::Queue::Redis.new(@redis_url, worker2_config)
+
+    lost_test = worker2.send(:try_to_reserve_lost_test)
+    assert_equal 'TestA#test_1', lost_test, 'Test should be marked as lost after heartbeat expires (> 2 minutes)'
   end
 
   def test_batching_with_many_chunks

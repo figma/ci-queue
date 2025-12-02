@@ -23,7 +23,10 @@ if test then
     redis.call('zadd', zset_key, current_time, test)
   end
   redis.call('lpush', worker_queue_key, test)
-  redis.call('hset', owners_key, test, worker_queue_key)
+  -- Store owner with initial reservation time and last heartbeat time
+  -- Format: "worker_queue_key|initial_reservation_time|last_heartbeat_time"
+  local owner_value = worker_queue_key .. "|" .. current_time .. "|" .. current_time
+  redis.call('hset', owners_key, test, owner_value)
   return test
 else
   return nil
