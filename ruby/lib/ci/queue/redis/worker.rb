@@ -288,7 +288,8 @@ module CI
 
         def try_to_reserve_lost_test
           current_time = CI::Queue.time_now.to_f
-          lost_test = eval_script(
+
+          result = eval_script(
             :reserve_lost,
             keys: [
               key('running'),
@@ -299,6 +300,15 @@ module CI
             ],
             argv: [current_time, timeout, 'true', config.timeout]
           )
+
+          # Parse result: format is "test_id|previous_owner" or nil
+          lost_test = nil
+          previous_owner = nil
+          if result
+            parts = result.split('|', 2)
+            lost_test = parts[0]
+            previous_owner = parts[1] if parts.length > 1
+          end
 
           if lost_test
             # Check what timeout was used (dynamic or default)
@@ -327,7 +337,10 @@ module CI
                                 "default_timeout=#{config.timeout}s"
                               end
 
-            warn "[reserve_lost] test=#{lost_test} current_time=#{current_time_readable} (#{current_time}) deadline=#{deadline_readable} (#{deadline}) gap=#{gap_seconds_formatted}s (#{gap_hours}h#{gap_mins}m#{gap_secs_formatted}s) [#{timeout_details}]"
+            # Add previous owner information (from Lua script)
+            previous_owner_info = previous_owner ? "previous_owner=#{previous_owner}" : 'previous_owner=unknown'
+
+            warn "[reserve_lost] test=#{lost_test} current_time=#{current_time_readable} (#{current_time}) deadline=#{deadline_readable} (#{deadline}) gap=#{gap_seconds_formatted}s (#{gap_hours}h#{gap_mins}m#{gap_secs_formatted}s) [#{timeout_details}] [#{previous_owner_info}]"
           end
 
           if lost_test.nil? && idle?

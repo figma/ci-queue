@@ -18,6 +18,14 @@ end
 
 for _, test in ipairs(lost_tests) do
   if redis.call('sismember', processed_key, test) == 0 then
+    -- Get previous owner before updating
+    local previous_owner_key = redis.call('hget', owners_key, test)
+    local previous_owner = nil
+    if previous_owner_key then
+      -- Extract worker_id from key format: build:<build_id>:worker:<worker_id>:queue
+      previous_owner = string.match(previous_owner_key, "worker:([^:]+):queue")
+    end
+    
     if use_dynamic_deadline then
       local dynamic_timeout = redis.call('hget', test_group_timeout_key, test)
       if not dynamic_timeout or dynamic_timeout == "" then
@@ -31,7 +39,13 @@ for _, test in ipairs(lost_tests) do
     end
     redis.call('lpush', worker_queue_key, test)
     redis.call('hset', owners_key, test, worker_queue_key) -- Take ownership
-    return test
+    
+    -- Return test and previous owner (separated by |)
+    if previous_owner then
+      return test .. "|" .. previous_owner
+    else
+      return test .. "|unknown"
+    end
   end
 end
 
