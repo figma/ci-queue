@@ -87,7 +87,9 @@ module CI
               executable = resolve_executable(id)
 
               if executable
-                yield executable
+                with_heartbeat(id) do
+                  yield executable
+                end
               else
                 warn("Warning: Could not resolve executable for ID #{id.inspect}. Acknowledging to remove from queue.")
                 acknowledge(id)
@@ -209,9 +211,86 @@ module CI
           nil
         end
 
+        # Send a heartbeat for the currently reserved test to indicate the worker is still active.
+        # This extends the deadline and prevents other workers from stealing the test.
+        # Returns true if heartbeat was successful, false if test was already processed or
+        # we're no longer the owner.
+        def heartbeat(test_or_id = nil)
+          test_key = if test_or_id
+                       test_or_id.respond_to?(:id) ? test_or_id.id : test_or_id
+                     else
+                       @reserved_test
+                     end
+          return false unless test_key
+
+          current_time = CI::Queue.time_now.to_f
+          result = eval_script(
+            :heartbeat,
+            keys: [
+              key('running'),
+              key('processed'),
+              key('owners'),
+              key('worker', worker_id, 'queue'),
+              key('heartbeats'),
+              key('test-group-timeout')
+            ],
+            argv: [current_time, test_key, config.timeout]
+          )
+
+          if result.is_a?(Array) && result.length == 2
+            new_deadline, timeout_used = result
+            current_time_readable = Time.at(current_time).strftime('%Y-%m-%d %H:%M:%S')
+            deadline_readable = Time.at(new_deadline).strftime('%Y-%m-%d %H:%M:%S')
+            warn "[heartbeat] test=#{test_key} current_time=#{current_time_readable} extended_deadline=#{deadline_readable} timeout=#{timeout_used}s"
+            true
+          else
+            false
+          end
+        rescue *CONNECTION_ERRORS
+          false
+        end
+
         private
 
         attr_reader :index
+
+        # Runs a block while sending periodic heartbeats in a background thread.
+        # This prevents other workers from stealing the test while it's being executed.
+        def with_heartbeat(test_id)
+          return yield unless config.heartbeat_interval&.positive?
+
+          # Pre-initialize Redis connection and script in current thread context
+          # This ensures background threads use the same initialized connection
+          ensure_connection_and_script(:heartbeat)
+
+          stop_heartbeat = false
+          heartbeat_thread = Thread.new do
+            until stop_heartbeat
+              sleep(config.heartbeat_interval)
+              break if stop_heartbeat
+
+              begin
+                heartbeat(test_id)
+              rescue StandardError => e
+                warn("[heartbeat] Failed to send heartbeat for #{test_id}: #{e.message}")
+              end
+            end
+          end
+
+          yield
+        ensure
+          stop_heartbeat = true
+          heartbeat_thread&.kill
+          heartbeat_thread&.join(1) # Wait up to 1 second for thread to finish
+        end
+
+        def ensure_connection_and_script(script)
+          # Pre-initialize Redis connection and script in current thread context
+          # This ensures background threads use the same initialized connection
+          load_script(script)
+          # Ping Redis to ensure connection is established
+          redis.ping
+        end
 
         def worker_id
           config.worker_id
@@ -295,9 +374,10 @@ module CI
               key('completed'),
               key('worker', worker_id, 'queue'),
               key('owners'),
-              key('test-group-timeout')
+              key('test-group-timeout'),
+              key('heartbeats')
             ],
-            argv: [current_time, timeout, 'true', config.timeout]
+            argv: [current_time, timeout, 'true', config.timeout, config.heartbeat_grace_period]
           )
 
           if lost_test

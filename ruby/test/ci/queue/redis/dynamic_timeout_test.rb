@@ -194,17 +194,19 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       'build:42:completed',
       'build:42:worker:1:queue',
       'build:42:owners',
-      'build:42:test-group-timeout' # 5th key for dynamic deadline
+      'build:42:test-group-timeout', # 5th key for dynamic deadline
+      'build:42:heartbeats' # 6th key for heartbeat tracking
     ]
 
     @worker.stub(:eval_script, proc { |script, keys:, argv:|
       assert_equal :reserve_lost, script
       assert_equal expected_keys, keys
-      assert_equal 4, argv.length
+      assert_equal 5, argv.length
       assert_instance_of Float, argv[0]
       assert_equal @config.timeout, argv[1]
       assert_equal 'true', argv[2]
       assert_equal @config.timeout, argv[3]
+      assert_equal @config.heartbeat_grace_period, argv[4]
       nil # Return nil (no lost test)
     }) do
       @worker.send(:try_to_reserve_lost_test)
