@@ -13,6 +13,7 @@ module CI
       attr_accessor :branch
       attr_accessor :timing_redis_url
       attr_accessor :write_duration_averages
+      attr_accessor :heartbeat_grace_period, :heartbeat_interval
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
       attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
@@ -61,7 +62,9 @@ module CI
         strategy: :random, timing_file: nil, timing_fallback_duration: 100.0, export_timing_file: nil,
         suite_max_duration: 120_000, suite_buffer_percent: 10,
         branch: nil,
-        timing_redis_url: nil
+        timing_redis_url: nil,
+        heartbeat_grace_period: 30,
+        heartbeat_interval: 10
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
@@ -96,6 +99,8 @@ module CI
         @branch = branch
         @timing_redis_url = timing_redis_url
         @write_duration_averages = false
+        @heartbeat_grace_period = heartbeat_grace_period
+        @heartbeat_interval = heartbeat_interval
       end
 
       def queue_init_timeout
