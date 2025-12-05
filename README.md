@@ -1,7 +1,7 @@
 # CI::Queue
 
 [![Gem Version](https://badge.fury.io/rb/ci-queue.svg)](https://rubygems.org/gems/ci-queue)
-[![Tests](https://github.com/Shopify/ci-queue/workflows/Tests/badge.svg?branch=master)](https://github.com/Shopify/ci-queue/actions?query=workflow%3ATests)
+[![Tests](https://github.com/figma/ci-queue/actions/workflows/tests.yml/badge.svg)](https://github.com/figma/ci-queue/actions/workflows/tests.yml)
 
 Distribute tests over many workers using a queue.
 
