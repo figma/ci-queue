@@ -29,8 +29,8 @@ module CI
                            {}
                          end
           # Enforce the max chunk duration falls within this range. 
-          @minimum_max_duration = config&.suite_minimum_max_chunk_duration || 120_000
-          @maximum_max_duration = config&.suite_maximum_max_chunk_duration || 300_000
+          @minimum_max_duration = config&.minimum_max_chunk_duration || 120_000
+          @maximum_max_duration = config&.maximum_max_chunk_duration || 300_000
           @fallback_duration = config&.timing_fallback_duration || 100.0
           @buffer_percent = config&.suite_buffer_percent || 10
 
