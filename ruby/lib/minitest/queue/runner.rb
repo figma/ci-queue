@@ -513,6 +513,24 @@ module Minitest
           end
 
           help = <<~EOS
+            Defines a lower-bound for the max chunk duration in seconds.
+            Defaults to 120 seconds.
+          EOS
+          opts.separator ""
+          opts.on('--minimum-max-chunk-duration MILLISECONDS', Integer, help) do |min|
+            queue_config.minimum_max_chunk_duration = min
+          end
+
+          help = <<~EOS
+            Defines an upper-bound for the max chunk duration in seconds.
+            Defaults to 300 seconds.
+          EOS
+          opts.separator ""
+          opts.on('--maximum-max-chunk-duration MILLISECONDS', Integer, help) do |max|
+            queue_config.maximum_max_chunk_duration = max
+          end
+
+          help = <<~EOS
             Defines how many user test tests can be fail.
             Defaults to none.
           EOS
