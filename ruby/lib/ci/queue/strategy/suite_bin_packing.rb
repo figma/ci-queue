@@ -138,11 +138,20 @@ module CI
           chunks = []
           current_chunk_tests = []
           current_chunk_duration = 0.0
-          chunk_index = 0
+          chunk_index = 0 
+
+          if suite_name == "ApiAdminOrgsTest"
+            puts "effective max #{effective_max}"
+          end
 
           suite_tests.each do |test|
             test_duration = get_test_duration(test.id)
 
+            if suite_name == "ApiAdminOrgsTest"
+              puts "test duration #{test_duration}"
+              puts "current chunk duration #{current_chunk_duration}"
+              puts "current chunk tests #{current_chunk_tests.size}"
+            end
             if current_chunk_duration + test_duration > effective_max && current_chunk_tests.any?
               # Finalize current chunk and start new one
               chunk_id = "#{suite_name}:chunk_#{chunk_index}"
