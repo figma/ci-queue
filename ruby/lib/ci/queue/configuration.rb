@@ -10,6 +10,7 @@ module CI
       attr_accessor :max_test_failed, :redis_ttl
       attr_accessor :strategy, :timing_file, :timing_fallback_duration, :export_timing_file
       attr_accessor :suite_max_duration, :suite_buffer_percent
+      attr_accessor :minimum_max_chunk_duration, :maximum_max_chunk_duration
       attr_accessor :branch
       attr_accessor :timing_redis_url
       attr_accessor :write_duration_averages
@@ -61,6 +62,7 @@ module CI
         export_flaky_tests_file: nil, known_flaky_tests: [],
         strategy: :random, timing_file: nil, timing_fallback_duration: 100.0, export_timing_file: nil,
         suite_max_duration: 120_000, suite_buffer_percent: 10,
+        minimum_max_chunk_duration: 120_000, maximum_max_chunk_duration: 300_000,
         branch: nil,
         timing_redis_url: nil,
         heartbeat_grace_period: 30,
@@ -76,6 +78,8 @@ module CI
         @max_test_duration = max_test_duration
         @max_test_duration_percentile = max_test_duration_percentile
         @max_test_failed = max_test_failed
+        @minimum_max_chunk_duration = minimum_max_chunk_duration
+        @maximum_max_chunk_duration = maximum_max_chunk_duration
         @namespace = namespace
         @requeue_tolerance = requeue_tolerance
         @seed = seed

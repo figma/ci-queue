@@ -28,8 +28,9 @@ module CI
                          else
                            {}
                          end
-
-          @max_duration = config&.suite_max_duration || 120_000
+          # Enforce the max chunk duration falls within this range. 
+          @minimum_max_duration = config&.minimum_max_chunk_duration || 120_000
+          @maximum_max_duration = config&.maximum_max_chunk_duration || 300_000
           @fallback_duration = config&.timing_fallback_duration || 100.0
           @buffer_percent = config&.suite_buffer_percent || 10
 
@@ -106,8 +107,8 @@ module CI
 
           puts "parallel_job_count: #{parallel_job_count}"
 
-          # If no parallel job count, fall back to configured max_duration
-          return @max_duration unless parallel_job_count && parallel_job_count > 0
+          # If no parallel job count, fall back to configured minimum max_duration
+          return @minimum_max_duration unless parallel_job_count && parallel_job_count > 0
 
           # Calculate total duration of all tests
           total_duration = tests.sum do |test|
@@ -118,11 +119,12 @@ module CI
           # This gives us the target max chunk time
           base_max_duration = total_duration.to_f / parallel_job_count
 
-          puts "base_max_duration: #{base_max_duration}, @max_duration: #{@max_duration}"
+          puts "base_max_duration: #{base_max_duration}, @minimum_max_duration: #{@minimum_max_duration}, @maximum_max_duration: #{@maximum_max_duration}"
 
-          # Ensure we don't go below a minimum reasonable value
+          # Ensure we don't go above or below reasonable floor values.
           # Use configured max_duration as a floor to prevent extremely small chunks
-          [base_max_duration, @max_duration].max
+          max_duration = [base_max_duration, @maximum_max_duration].min
+          [max_duration, @minimum_max_duration].max
         end
 
         def create_chunks_for_suite(suite_name, suite_tests, max_duration)
