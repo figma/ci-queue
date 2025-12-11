@@ -10,10 +10,13 @@ module CI
 
       class << self
         attr_accessor :requeue_offset
+        attr_accessor :max_sleep_time
       end
       self.requeue_offset = 42
+      self.max_sleep_time = 2
 
       class Worker < Base
+        DEFAULT_SLEEP_SECONDS = 0.5
         attr_reader :total
 
         def initialize(redis, config)
@@ -81,8 +84,10 @@ module CI
           end
           idle_since = nil
           idle_state_printed = false
+          attempt = 0
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
             if id = reserve
+              attempt = 0
               idle_since = nil
               executable = resolve_executable(id)
 
@@ -111,7 +116,11 @@ module CI
                 end
                 idle_state_printed = true
               end
-              sleep 0.05
+              # Adding exponential backoff to avoid hammering Redis
+              # we just stay online here in case a test gets retried or times out so we can afford to wait
+              sleep_time = [DEFAULT_SLEEP_SECONDS * (2 ** attempt), Redis.max_sleep_time].min
+              attempt += 1
+              sleep sleep_time
             end
           end
           redis.pipelined do |pipeline|
