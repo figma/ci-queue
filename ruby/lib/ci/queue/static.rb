@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'concurrent/set'
+
 module CI
   module Queue
     class Static
@@ -111,6 +113,10 @@ module CI
 
       def requeues
         @requeues ||= Hash.new(0)
+      end
+
+      def reserved_tests
+        @reserved_tests ||= Concurrent::Set.new
       end
     end
   end

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'ci/queue/static'
-require 'set'
+require 'concurrent/set'
 
 module CI
   module Queue
@@ -21,6 +21,7 @@ module CI
 
         def initialize(redis, config)
           @reserved_test = nil
+          @reserved_tests = Concurrent::Set.new
           @shutdown_required = false
           @idle_since = nil
           super(redis, config)
@@ -299,6 +300,10 @@ module CI
           load_script(script)
           # Ping Redis to ensure connection is established
           redis.ping
+        end
+
+        def reserved_tests
+          @reserved_tests ||= Concurrent::Set.new
         end
 
         def worker_id

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 require 'test_helper'
+require 'concurrent/set'
 
 module Minitest::Queue
   class BuildStatusRecorderTest < Minitest::Test
@@ -49,6 +50,10 @@ module Minitest::Queue
     end
 
     private
+
+    def reserve(queue, method_name)
+      queue.instance_variable_set(:@reserved_tests, Concurrent::Set.new([Minitest::Queue::SingleExample.new("Minitest::Test", method_name).id]))
+    end
 
     def worker(id)
       CI::Queue::Redis.new(
