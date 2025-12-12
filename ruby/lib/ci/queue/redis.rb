@@ -12,6 +12,7 @@ require 'ci/queue/redis/grind_supervisor'
 require 'ci/queue/redis/test_time_record'
 require 'ci/queue/redis/test_duration_moving_averages'
 require 'ci/queue/redis/update_test_duration_moving_average'
+require 'ci/queue/redis/key_shortener'
 
 module CI
   module Queue
