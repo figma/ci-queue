@@ -61,7 +61,7 @@ module CI
 
             sleep 0.1
           end
-          raise LostMaster, "The master worker is still `#{master_status}` after #{timeout} seconds waiting."
+          raise LostMaster, "The master worker (worker #{master_worker_id}) is still `#{master_status}` after #{timeout} seconds waiting."
         end
 
         def workers_count
