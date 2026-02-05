@@ -599,7 +599,7 @@ module CI
 
           with_master_setup_heartbeat do
             # Use the same seed for deterministic ordering
-            random = Random.new(Digest::SHA256.hexdigest(config.seed).to_i(16))
+            random = Random.new(Digest::MD5.hexdigest(config.seed).to_i(16))
             executables = reorder_tests(tests, random: random)
 
             chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
