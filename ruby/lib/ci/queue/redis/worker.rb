@@ -594,19 +594,6 @@ module CI
         def run_master_setup
           return unless @master && @index
 
-          # Check if setup is already complete (original master finished before we took over)
-          # This prevents duplicate test pushes in the race where:
-          # 1. Original master's push() passes WATCH check
-          # 2. Original master's heartbeat becomes stale during redis.multi
-          # 3. We take over (status still "setup")
-          # 4. Original master's transaction commits, sets status="ready"
-          # 5. We would push again without this check
-          status = master_status
-          if status != 'setup'
-            warn "Worker #{worker_id} took over but setup already complete (status=#{status}), skipping"
-            return
-          end
-
           # Reconstruct tests array from index
           tests = @index.values
 
