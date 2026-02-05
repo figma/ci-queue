@@ -70,7 +70,7 @@ module CI
                 if respond_to?(:attempt_master_takeover, true) && attempt_master_takeover
                   # Takeover succeeded - run master setup
                   if respond_to?(:run_master_setup, true)
-                    run_master_setup
+                    execute_master_setup
                     return true
                   end
                 end

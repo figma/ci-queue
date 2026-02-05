@@ -39,20 +39,9 @@ module CI
           # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
           @total = tests.size
+          @random = random
 
-          if acquire_master_role?
-            with_master_setup_heartbeat do
-              executables = reorder_tests(tests, random: random)
-
-              chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
-              individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
-
-              store_chunk_metadata(chunks) if chunks.any?
-
-              all_ids = chunks.map(&:id) + individual_tests.map(&:id)
-              push(all_ids)
-            end
-          end
+          execute_master_setup(tests) if acquire_master_role?
 
           register_worker_presence
 
@@ -589,18 +578,12 @@ module CI
           raise if master?
         end
 
-        # Run master setup after a successful takeover.
-        # Reconstructs the work the original master would have done.
-        def run_master_setup
+        # Shared logic for master setup - reorders tests, stores chunk metadata, and pushes to queue.
+        # Used by both initial master setup (populate) and takeover.
+        def execute_master_setup(tests)
           return unless @master && @index
-
-          # Reconstruct tests array from index
-          tests = @index.values
-
           with_master_setup_heartbeat do
-            # Use the same seed for deterministic ordering
-            random = Random.new(Digest::MD5.hexdigest(config.seed).to_i(16))
-            executables = reorder_tests(tests, random: random)
+            executables = reorder_tests(tests, random: @random)
 
             chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
             individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
