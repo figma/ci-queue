@@ -529,9 +529,15 @@ module CI
             begin
               redis.set(key('master-worker-id'), worker_id)
               redis.expire(key('master-worker-id'), config.redis_ttl)
+
+              # Set initial heartbeat immediately to prevent premature takeover
+              # This closes the window where status='setup' but no heartbeat exists
+              redis.set(key('master-setup-heartbeat'), CI::Queue.time_now.to_f)
+              redis.expire(key('master-setup-heartbeat'), config.redis_ttl)
+
               warn "Worker #{worker_id} elected as master"
             rescue *CONNECTION_ERRORS
-              # If setting master-worker-id fails, we still have master status
+              # If setting master-worker-id/heartbeat fails, we still have master status
               # Log but don't lose master role
               warn("Failed to set master-worker-id: #{$!.message}")
             end
