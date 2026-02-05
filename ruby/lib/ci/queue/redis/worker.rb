@@ -543,6 +543,8 @@ module CI
         def attempt_master_takeover
           return false if @master # Already master
 
+          warn "Worker #{worker_id} attempting to takeover as master"
+
           current_time = CI::Queue.time_now.to_f
           result = eval_script(
             :takeover_master,
@@ -564,6 +566,7 @@ module CI
             warn "Worker #{worker_id} took over as master (previous master died during setup)"
             true
           else
+            warn "Failed to takeover as master. Current master is #{master_worker_id}"
             false
           end
         rescue *CONNECTION_ERRORS => e
