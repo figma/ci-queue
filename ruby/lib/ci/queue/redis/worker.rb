@@ -481,26 +481,37 @@ module CI
 
         def push(tests)
           @total = tests.size
+          return unless @master
 
-          if @master
-            # Guard against split-brain: verify we're still the master before pushing
-            # This prevents race where old master reconnects after being replaced
-            current_master = redis.get(key('master-worker-id'))
+          # Use WATCH/MULTI for atomic check-and-push to prevent TOCTOU race.
+          # If master-worker-id changes between WATCH and MULTI, transaction aborts.
+          result = redis.watch(key('master-worker-id')) do |rd|
+            current_master = rd.get(key('master-worker-id'))
+
             if current_master && current_master != worker_id
-              warn "Worker #{worker_id} lost master role to #{current_master}, aborting push"
-              @master = false
-              return
-            end
+              # We're not the master anymore, unwatch and abort
+              rd.unwatch
+              :not_master
+            else
+              # We're still master, execute atomic transaction
+              rd.multi do |transaction|
+                transaction.lpush(key('queue'), tests) unless tests.empty?
+                transaction.set(key('total'), @total)
+                transaction.set(key('master-status'), 'ready')
 
-            redis.multi do |transaction|
-              transaction.lpush(key('queue'), tests) unless tests.empty?
-              transaction.set(key('total'), @total)
-              transaction.set(key('master-status'), 'ready')
-
-              transaction.expire(key('queue'), config.redis_ttl)
-              transaction.expire(key('total'), config.redis_ttl)
-              transaction.expire(key('master-status'), config.redis_ttl)
+                transaction.expire(key('queue'), config.redis_ttl)
+                transaction.expire(key('total'), config.redis_ttl)
+                transaction.expire(key('master-status'), config.redis_ttl)
+              end
             end
+          end
+
+          # result is nil if WATCH detected a change (race condition)
+          # result is :not_master if we detected we're not master
+          # result is an array of responses if transaction succeeded
+          if result.nil? || result == :not_master
+            warn "Worker #{worker_id} lost master role (race detected), aborting push"
+            @master = false
           end
         rescue *CONNECTION_ERRORS
           raise if @master
