@@ -42,7 +42,12 @@ module CI
           @random = random
           @tests = tests
 
-          execute_master_setup if acquire_master_role?
+          if acquire_master_role?
+            warn "Master acquired role. Sleeping for 45 seconds to simulate a long setup."
+            sleep 45
+            warn "Master finished sleeping. should have lost role."
+            execute_master_setup
+          end
 
           register_worker_presence
 

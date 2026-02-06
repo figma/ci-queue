@@ -53,7 +53,7 @@ module CI
           total - size
         end
 
-        def wait_for_master(timeout: 120)
+        def wait_for_master(timeout: 180)
           return true if master?
 
           last_takeover_check = CI::Queue.time_now.to_f
