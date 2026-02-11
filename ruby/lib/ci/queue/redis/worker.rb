@@ -584,7 +584,7 @@ module CI
 
         # Shared logic for master setup - reorders tests, stores chunk metadata, and pushes to queue.
         # Used by both initial master setup (populate) and takeover.
-        def execute_master_setup(tests)
+        def execute_master_setup
           return unless @master && @index
           with_master_setup_heartbeat do
             executables = reorder_tests(@tests, random: @random)
