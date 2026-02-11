@@ -69,7 +69,7 @@ module CI
               if queue_initializing? && master_setup_heartbeat_stale?
                 if respond_to?(:attempt_master_takeover, true) && attempt_master_takeover
                   # Takeover succeeded - run master setup
-                  if respond_to?(:run_master_setup, true)
+                  if respond_to?(:execute_master_setup, true)
                     execute_master_setup
                     return true
                   end
