@@ -40,8 +40,9 @@ module CI
           @index = tests.map { |t| [t.id, t] }.to_h
           @total = tests.size
           @random = random
+          @tests = tests
 
-          execute_master_setup(tests) if acquire_master_role?
+          execute_master_setup if acquire_master_role?
 
           register_worker_presence
 
@@ -543,7 +544,7 @@ module CI
         def attempt_master_takeover
           return false if @master # Already master
 
-          warn "Worker #{worker_id} attempting to takeover as master"
+          warn "Worker #{worker_id} attempting to takeover as master from #{master_worker_id}"
 
           current_time = CI::Queue.time_now.to_f
           result = eval_script(
@@ -586,7 +587,7 @@ module CI
         def execute_master_setup(tests)
           return unless @master && @index
           with_master_setup_heartbeat do
-            executables = reorder_tests(tests, random: @random)
+            executables = reorder_tests(@tests, random: @random)
 
             chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
             individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
