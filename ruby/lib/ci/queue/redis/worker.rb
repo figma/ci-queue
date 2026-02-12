@@ -2,6 +2,8 @@
 
 require 'ci/queue/static'
 require 'concurrent/set'
+require 'digest/sha2'
+require 'set'
 
 module CI
   module Queue
@@ -37,18 +39,10 @@ module CI
           # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
           @total = tests.size
+          @random = random
+          @tests = tests
 
-          if acquire_master_role?
-            executables = reorder_tests(tests, random: random)
-
-            chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
-            individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
-
-            store_chunk_metadata(chunks) if chunks.any?
-
-            all_ids = chunks.map(&:id) + individual_tests.map(&:id)
-            push(all_ids)
-          end
+          execute_master_setup if acquire_master_role?
 
           register_worker_presence
 
@@ -294,6 +288,44 @@ module CI
           heartbeat_thread&.join(1) # Wait up to 1 second for thread to finish
         end
 
+        # Runs a block while sending periodic heartbeats during master setup.
+        # This allows other workers to detect if the master dies during setup.
+        def with_master_setup_heartbeat
+          return yield unless config.master_setup_heartbeat_interval&.positive?
+
+          # Send initial heartbeat immediately
+          send_master_setup_heartbeat
+
+          stop_heartbeat = false
+          heartbeat_thread = Thread.new do
+            until stop_heartbeat
+              sleep(config.master_setup_heartbeat_interval)
+              break if stop_heartbeat
+
+              begin
+                send_master_setup_heartbeat
+              rescue StandardError => e
+                warn("[master-setup-heartbeat] Failed to send heartbeat: #{e.message}")
+              end
+            end
+          end
+
+          yield
+        ensure
+          stop_heartbeat = true
+          heartbeat_thread&.kill
+          heartbeat_thread&.join(1)
+        end
+
+        # Send a heartbeat to indicate master is still alive during setup
+        def send_master_setup_heartbeat
+          current_time = CI::Queue.time_now.to_f
+          redis.set(key('master-setup-heartbeat'), current_time)
+          redis.expire(key('master-setup-heartbeat'), config.redis_ttl)
+        rescue *CONNECTION_ERRORS => e
+          warn("[master-setup-heartbeat] Connection error: #{e.message}")
+        end
+
         def ensure_connection_and_script(script)
           # Pre-initialize Redis connection and script in current thread context
           # This ensures background threads use the same initialized connection
@@ -439,17 +471,37 @@ module CI
 
         def push(tests)
           @total = tests.size
+          return unless @master
 
-          if @master
-            redis.multi do |transaction|
-              transaction.lpush(key('queue'), tests) unless tests.empty?
-              transaction.set(key('total'), @total)
-              transaction.set(key('master-status'), 'ready')
+          # Use WATCH/MULTI for atomic check-and-push to prevent TOCTOU race.
+          # If master-worker-id changes between WATCH and MULTI, transaction aborts.
+          result = redis.watch(key('master-worker-id')) do |rd|
+            current_master = rd.get(key('master-worker-id'))
 
-              transaction.expire(key('queue'), config.redis_ttl)
-              transaction.expire(key('total'), config.redis_ttl)
-              transaction.expire(key('master-status'), config.redis_ttl)
+            if current_master && current_master != worker_id
+              # We're not the master anymore, unwatch and abort
+              rd.unwatch
+              :not_master
+            else
+              # We're still master, execute atomic transaction
+              rd.multi do |transaction|
+                transaction.lpush(key('queue'), tests) unless tests.empty?
+                transaction.set(key('total'), @total)
+                transaction.set(key('master-status'), 'ready')
+
+                transaction.expire(key('queue'), config.redis_ttl)
+                transaction.expire(key('total'), config.redis_ttl)
+                transaction.expire(key('master-status'), config.redis_ttl)
+              end
             end
+          end
+
+          # result is nil if WATCH detected a change (race condition)
+          # result is :not_master if we detected we're not master
+          # result is an array of responses if transaction succeeded
+          if result.nil? || result == :not_master
+            warn "Worker #{worker_id} lost master role (race detected), aborting push"
+            @master = false
           end
         rescue *CONNECTION_ERRORS
           raise if @master
@@ -467,9 +519,15 @@ module CI
             begin
               redis.set(key('master-worker-id'), worker_id)
               redis.expire(key('master-worker-id'), config.redis_ttl)
+
+              # Set initial heartbeat immediately to prevent premature takeover
+              # This closes the window where status='setup' but no heartbeat exists
+              redis.set(key('master-setup-heartbeat'), CI::Queue.time_now.to_f)
+              redis.expire(key('master-setup-heartbeat'), config.redis_ttl)
+
               warn "Worker #{worker_id} elected as master"
             rescue *CONNECTION_ERRORS
-              # If setting master-worker-id fails, we still have master status
+              # If setting master-worker-id/heartbeat fails, we still have master status
               # Log but don't lose master role
               warn("Failed to set master-worker-id: #{$!.message}")
             end
@@ -480,11 +538,65 @@ module CI
           false
         end
 
+        # Attempt to take over as master when current master appears dead during setup.
+        # Uses atomic Lua script to ensure only one worker can win the takeover.
+        # Returns true if takeover succeeded, false otherwise.
+        def attempt_master_takeover
+          return false if @master # Already master
+
+          warn "Worker #{worker_id} attempting to takeover as master from #{master_worker_id}"
+
+          current_time = CI::Queue.time_now.to_f
+          result = eval_script(
+            :takeover_master,
+            keys: [
+              key('master-status'),
+              key('master-worker-id'),
+              key('master-setup-heartbeat')
+            ],
+            argv: [
+              worker_id,
+              current_time,
+              config.master_setup_heartbeat_timeout,
+              config.redis_ttl
+            ]
+          )
+
+          if result == 1
+            @master = true
+            warn "Worker #{worker_id} took over as master (previous master died during setup)"
+            true
+          else
+            warn "Failed to takeover as master. Current master is #{master_worker_id}"
+            false
+          end
+        rescue *CONNECTION_ERRORS => e
+          warn "[takeover] Connection error during takeover attempt: #{e.message}"
+          false
+        end
+
         def register_worker_presence
           register
           redis.expire(key('workers'), config.redis_ttl)
         rescue *CONNECTION_ERRORS
           raise if master?
+        end
+
+        # Shared logic for master setup - reorders tests, stores chunk metadata, and pushes to queue.
+        # Used by both initial master setup (populate) and takeover.
+        def execute_master_setup
+          return unless @master && @index
+          with_master_setup_heartbeat do
+            executables = reorder_tests(@tests, random: @random)
+
+            chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
+            individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
+
+            store_chunk_metadata(chunks) if chunks.any?
+
+            all_ids = chunks.map(&:id) + individual_tests.map(&:id)
+            push(all_ids)
+          end
         end
 
         def store_chunk_metadata(chunks)

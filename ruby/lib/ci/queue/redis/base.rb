@@ -56,8 +56,26 @@ module CI
         def wait_for_master(timeout: 120)
           return true if master?
 
+          last_takeover_check = CI::Queue.time_now.to_f
+
           (timeout * 10 + 1).to_i.times do
             return true if queue_initialized?
+
+            # Periodically check if master is dead and attempt takeover
+            current_time = CI::Queue.time_now.to_f
+            if current_time - last_takeover_check >= config.master_setup_heartbeat_interval
+              last_takeover_check = current_time
+
+              if queue_initializing? && master_setup_heartbeat_stale?
+                if respond_to?(:attempt_master_takeover, true) && attempt_master_takeover
+                  # Takeover succeeded - run master setup
+                  if respond_to?(:execute_master_setup, true)
+                    execute_master_setup
+                    return true
+                  end
+                end
+              end
+            end
 
             sleep 0.1
           end
@@ -95,6 +113,19 @@ module CI
 
         def master_worker_id
           redis.get(key('master-worker-id'))
+        end
+
+        # Check if the master setup heartbeat is stale (or missing)
+        # Returns true if heartbeat is older than master_setup_heartbeat_timeout
+        def master_setup_heartbeat_stale?
+          heartbeat = redis.get(key('master-setup-heartbeat'))
+          return true unless heartbeat # No heartbeat = stale (master may have died before first heartbeat)
+
+          current_time = CI::Queue.time_now.to_f
+          heartbeat_age = current_time - heartbeat.to_f
+          heartbeat_age >= config.master_setup_heartbeat_timeout
+        rescue *CONNECTION_ERRORS
+          false # On connection error, don't attempt takeover
         end
 
         private
