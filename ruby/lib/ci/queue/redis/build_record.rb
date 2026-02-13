@@ -27,7 +27,7 @@ module CI
 
         TOTAL_KEY = "___total___"
         def requeued_tests
-          requeues = redis.hgetall(key('requeues-count'))
+          requeues = redis.hgetall(generation_key('requeues-count'))
           requeues.delete(TOTAL_KEY)
           requeues
         end
@@ -125,6 +125,12 @@ module CI
 
         def key(*args)
           ['build', config.build_id, *args].join(':')
+        end
+
+        def generation_key(*args)
+          gen = @queue.respond_to?(:current_generation) ? @queue.current_generation : nil
+          return key(*args) unless gen  # Fallback for backwards compatibility
+          key('gen', gen, *args)
         end
       end
     end
