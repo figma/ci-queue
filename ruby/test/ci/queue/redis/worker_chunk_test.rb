@@ -23,6 +23,11 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     @redis.flushdb if @redis
   end
 
+  def generation_prefix(build_id = '42')
+    gen = @redis.get("build:#{build_id}:current-generation")
+    gen ? "build:#{build_id}:gen:#{gen}" : "build:#{build_id}"
+  end
+
   def test_populate_stores_chunk_metadata_in_redis
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2'])
     test_ids = ['TestA#test_1', 'TestA#test_2']
@@ -36,7 +41,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
 
     # Verify chunk metadata was stored
-    chunk_data = @redis.get('build:42:chunk:TestA:chunk_0')
+    chunk_data = @redis.get("#{generation_prefix}:chunk:TestA:chunk_0")
     refute_nil chunk_data
 
     parsed = JSON.parse(chunk_data)
@@ -162,8 +167,8 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
   def test_acknowledge_chunk
     # Set up a chunk as if it were reserved (in running zset)
     chunk_id = 'TestA:chunk_0'
-    @redis.zadd('build:42:running', Time.now.to_i, chunk_id)
-    @redis.hset('build:42:owners', chunk_id, 'build:42:worker:1:queue')
+    @redis.zadd("#{generation_prefix}:running", Time.now.to_i, chunk_id)
+    @redis.hset("#{generation_prefix}:owners", chunk_id, 'build:42:worker:1:queue')
     @worker.instance_variable_set(:@reserved_test, chunk_id)
 
     # Acknowledge the chunk
@@ -171,9 +176,9 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
     # Verify chunk was removed from running and added to processed
     assert result
-    refute @redis.zrank('build:42:running', chunk_id)
-    assert @redis.sismember('build:42:processed', chunk_id)
-    refute @redis.hexists('build:42:owners', chunk_id)
+    refute @redis.zrank("#{generation_prefix}:running", chunk_id)
+    assert @redis.sismember("#{generation_prefix}:processed", chunk_id)
+    refute @redis.hexists("#{generation_prefix}:owners", chunk_id)
   end
 
   def test_populate_with_mixed_chunks_and_tests
@@ -194,7 +199,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
 
     # Check that both chunk and individual test IDs are in queue
-    queue_items = @redis.lrange('build:42:queue', 0, -1)
+    queue_items = @redis.lrange("#{generation_prefix}:queue", 0, -1)
     assert_includes queue_items, 'TestA:chunk_0'
     assert_includes queue_items, 'TestB#test_1'
   end
@@ -210,7 +215,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       @worker.populate(tests)
     end
 
-    ttl = @redis.ttl('build:42:chunk:TestA:chunk_0')
+    ttl = @redis.ttl("#{generation_prefix}:chunk:TestA:chunk_0")
     assert ttl > 0, 'Chunk metadata should have TTL set'
   end
 
@@ -228,7 +233,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
     # Verify all chunks were stored despite batching
     chunks.each do |chunk|
-      chunk_data = @redis.get("build:42:chunk:#{chunk.id}")
+      chunk_data = @redis.get("#{generation_prefix}:chunk:#{chunk.id}")
       refute_nil chunk_data, "Chunk #{chunk.id} should be stored"
 
       parsed = JSON.parse(chunk_data)
@@ -237,7 +242,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
 
     # Verify all chunk IDs are in the chunks set
-    stored_chunks = @redis.smembers('build:42:chunks')
+    stored_chunks = @redis.smembers("#{generation_prefix}:chunks")
     chunks.each do |chunk|
       assert_includes stored_chunks, chunk.id
     end

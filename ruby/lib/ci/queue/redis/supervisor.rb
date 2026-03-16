@@ -9,7 +9,7 @@ module CI
 
         def total
           wait_for_master(timeout: config.queue_init_timeout)
-          redis.get(key('total')).to_i
+          redis.get(generation_key('total')).to_i
         end
 
         def build
@@ -53,7 +53,7 @@ module CI
 
         def active_workers?
           # if there are running jobs we assume there are still agents active
-          redis.zrangebyscore(key('running'), CI::Queue.time_now.to_f - config.timeout, "+inf", limit: [0,1]).count > 0
+          redis.zrangebyscore(generation_key('running'), CI::Queue.time_now.to_f - config.timeout, "+inf", limit: [0,1]).count > 0
         end
       end
     end

@@ -2,6 +2,7 @@
 
 require 'ci/queue/static'
 require 'concurrent/set'
+require 'securerandom'
 
 module CI
   module Queue
@@ -34,23 +35,40 @@ module CI
         end
 
         def populate(tests, random: Random.new)
-          # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
           @total = tests.size
 
-          if acquire_master_role?
-            executables = reorder_tests(tests, random: random)
+          election_attempts = 0
+          max_attempts = config.max_election_attempts
 
-            chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
-            individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
+          loop do
+            if acquire_master_role?
+              executables = reorder_tests(tests, random: random)
 
-            store_chunk_metadata(chunks) if chunks.any?
+              chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
+              individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
 
-            all_ids = chunks.map(&:id) + individual_tests.map(&:id)
-            push(all_ids)
+              store_chunk_metadata(chunks) if chunks.any?
+
+              all_ids = chunks.map(&:id) + individual_tests.map(&:id)
+              push(all_ids)
+            end
+
+            register_worker_presence
+
+            begin
+              wait_for_master(timeout: config.queue_init_timeout)
+              break
+            rescue MasterDied => e
+              election_attempts += 1
+              if election_attempts >= max_attempts
+                raise LostMaster, "Failed to elect master after #{max_attempts} attempts: #{e.message}"
+              end
+              @master = nil
+              @generation = nil
+              warn "Previous master died (attempt #{election_attempts}/#{max_attempts}), retrying election..."
+            end
           end
-
-          register_worker_presence
 
           self
         end
@@ -87,6 +105,11 @@ module CI
           idle_state_printed = false
           attempt = 0
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
+            if generation_stale?
+              warn "Generation changed - queue was repopulated by new master. Exiting poll loop."
+              break
+            end
+
             if id = reserve
               attempt = 0
               idle_since = nil
@@ -104,15 +127,15 @@ module CI
               idle_since ||= CI::Queue.time_now
               if CI::Queue.time_now - idle_since > 120 && !idle_state_printed
                 puts "Worker #{worker_id} has been idle for 120 seconds. Printing global state..."
-                running_tests = redis.zrange(key('running'), 0, -1, withscores: true)
-                puts "  Processed tests: #{redis.scard(key('processed'))}"
-                puts "  Pending tests: #{redis.llen(key('queue'))}. #{redis.lrange(key('queue'), 0, -1)}"
+                running_tests = redis.zrange(generation_key('running'), 0, -1, withscores: true)
+                puts "  Processed tests: #{redis.scard(generation_key('processed'))}"
+                puts "  Pending tests: #{redis.llen(generation_key('queue'))}. #{redis.lrange(generation_key('queue'), 0, -1)}"
                 puts "  Running tests: #{running_tests.size}. #{running_tests}"
-                puts "  Owners: #{redis.hgetall(key('owners'))}"
+                puts "  Owners: #{redis.hgetall(generation_key('owners'))}"
                 unless running_tests.empty?
                   puts '  Checking if running tests are in processed set:'
                   running_tests.each do |test, _score|
-                    puts "    #{test}: #{redis.sismember(key('processed'), test)}"
+                    puts "    #{test}: #{redis.sismember(generation_key('processed'), test)}"
                   end
                 end
                 idle_state_printed = true
@@ -126,7 +149,7 @@ module CI
           end
           redis.pipelined do |pipeline|
             pipeline.expire(key('worker', worker_id, 'queue'), config.redis_ttl)
-            pipeline.expire(key('processed'), config.redis_ttl)
+            pipeline.expire(generation_key('processed'), config.redis_ttl)
           end
         rescue *CONNECTION_ERRORS
         end
@@ -173,7 +196,7 @@ module CI
           begin
             eval_script(
               :acknowledge,
-              keys: [key('running'), key('processed'), key('owners')],
+              keys: [generation_key('running'), generation_key('processed'), generation_key('owners')],
               argv: [test_key]
             ) == 1
           rescue StandardError => e
@@ -198,12 +221,12 @@ module CI
           requeued = config.max_requeues > 0 && global_max_requeues > 0 && !config.known_flaky?(test_key) && eval_script(
             :requeue,
             keys: [
-              key('processed'),
-              key('requeues-count'),
-              key('queue'),
-              key('running'),
+              generation_key('processed'),
+              generation_key('requeues-count'),
+              generation_key('queue'),
+              generation_key('running'),
               key('worker', worker_id, 'queue'),
-              key('owners')
+              generation_key('owners')
             ],
             argv: [config.max_requeues, global_max_requeues, test_key, offset]
           ) == 1
@@ -215,7 +238,7 @@ module CI
         def release!
           eval_script(
             :release,
-            keys: [key('running'), key('worker', worker_id, 'queue'), key('owners')],
+            keys: [generation_key('running'), key('worker', worker_id, 'queue'), generation_key('owners')],
             argv: []
           )
           nil
@@ -237,12 +260,12 @@ module CI
           result = eval_script(
             :heartbeat,
             keys: [
-              key('running'),
-              key('processed'),
-              key('owners'),
+              generation_key('running'),
+              generation_key('processed'),
+              generation_key('owners'),
               key('worker', worker_id, 'queue'),
-              key('heartbeats'),
-              key('test-group-timeout')
+              generation_key('heartbeats'),
+              generation_key('test-group-timeout')
             ],
             argv: [current_time, test_key, config.timeout]
           )
@@ -338,19 +361,19 @@ module CI
           test_id = eval_script(
             :reserve,
             keys: [
-              key('queue'),
-              key('running'),
-              key('processed'),
+              generation_key('queue'),
+              generation_key('running'),
+              generation_key('processed'),
               key('worker', worker_id, 'queue'),
-              key('owners'),
-              key('test-group-timeout')
+              generation_key('owners'),
+              generation_key('test-group-timeout')
             ],
             argv: [current_time, 'true', config.timeout]
           )
 
           if test_id
             # Check what timeout was used (dynamic or default)
-            dynamic_timeout = redis.hget(key('test-group-timeout'), test_id)
+            dynamic_timeout = redis.hget(generation_key('test-group-timeout'), test_id)
             timeout_used = dynamic_timeout ? dynamic_timeout.to_f : config.timeout
             deadline = current_time + timeout_used
             gap_seconds = timeout_used
@@ -386,19 +409,19 @@ module CI
           lost_test = eval_script(
             :reserve_lost,
             keys: [
-              key('running'),
-              key('completed'),
+              generation_key('running'),
+              generation_key('processed'),
               key('worker', worker_id, 'queue'),
-              key('owners'),
-              key('test-group-timeout'),
-              key('heartbeats')
+              generation_key('owners'),
+              generation_key('test-group-timeout'),
+              generation_key('heartbeats')
             ],
             argv: [current_time, timeout, 'true', config.timeout, config.heartbeat_grace_period]
           )
 
           if lost_test
             # Check what timeout was used (dynamic or default)
-            dynamic_timeout = redis.hget(key('test-group-timeout'), lost_test)
+            dynamic_timeout = redis.hget(generation_key('test-group-timeout'), lost_test)
             timeout_used = dynamic_timeout ? dynamic_timeout.to_f : config.timeout
             deadline = current_time + timeout_used
             gap_seconds = timeout_used
@@ -429,7 +452,7 @@ module CI
           if lost_test.nil? && idle?
             puts "Worker #{worker_id} could not reserve a lost test while idle"
             puts 'Printing running tests:'
-            puts "#{redis.zrange(key('running'), 0, -1, withscores: true)}"
+            puts "#{redis.zrange(generation_key('running'), 0, -1, withscores: true)}"
           end
 
           build.record_warning(Warnings::RESERVED_LOST_TEST, test: lost_test, timeout: timeout) if lost_test
@@ -441,15 +464,15 @@ module CI
           @total = tests.size
 
           if @master
-            redis.multi do |transaction|
-              transaction.lpush(key('queue'), tests) unless tests.empty?
-              transaction.set(key('total'), @total)
-              transaction.set(key('master-status'), 'ready')
+            renew_master_lock!
 
-              transaction.expire(key('queue'), config.redis_ttl)
-              transaction.expire(key('total'), config.redis_ttl)
-              transaction.expire(key('master-status'), config.redis_ttl)
-            end
+            argv = ["setup:#{@generation}", @generation, @total.to_s, config.redis_ttl.to_s] + tests
+            result = eval_script(
+              :push_queue,
+              keys: [key('master-status'), generation_key('queue'), generation_key('total'), key('current-generation')],
+              argv: argv
+            )
+            raise MasterDied, "CAS push failed — lock was lost" unless result == 1
           end
         rescue *CONNECTION_ERRORS
           raise if @master
@@ -462,22 +485,51 @@ module CI
         def acquire_master_role?
           return true if @master
 
-          @master = redis.setnx(key('master-status'), 'setup')
+          @generation = SecureRandom.uuid
+
+          @master = redis.set(
+            key('master-status'),
+            "setup:#{@generation}",
+            nx: true,
+            ex: config.master_lock_ttl
+          )
+
           if @master
             begin
-              redis.set(key('master-worker-id'), worker_id)
-              redis.expire(key('master-worker-id'), config.redis_ttl)
-              warn "Worker #{worker_id} elected as master"
+              redis.multi do |tx|
+                tx.set(key('master-worker-id'), worker_id)
+                tx.expire(key('master-worker-id'), config.redis_ttl)
+              end
+              warn "Worker #{worker_id} elected as master (generation #{@generation})"
             rescue *CONNECTION_ERRORS
-              # If setting master-worker-id fails, we still have master status
-              # Log but don't lose master role
               warn("Failed to set master-worker-id: #{$!.message}")
             end
+          else
+            @generation = nil
           end
+
           @master
         rescue *CONNECTION_ERRORS
           @master = nil
+          @generation = nil
           false
+        end
+
+        def generation_stale?
+          return false unless @current_generation
+          return false if @last_generation_check_at && (CI::Queue.time_now - @last_generation_check_at) < 5
+          current = redis.get(key('current-generation'))
+          @last_generation_check_at = CI::Queue.time_now
+          current && current != @current_generation
+        end
+
+        def renew_master_lock!
+          result = eval_script(
+            :renew_master_lock,
+            keys: [key('master-status')],
+            argv: ["setup:#{@generation}", config.master_lock_ttl]
+          )
+          raise MasterDied, "Lock renewal failed — another master may have taken over" unless result == 1
         end
 
         def register_worker_presence
@@ -497,13 +549,13 @@ module CI
               chunk_batch.each do |chunk|
                 # Store chunk metadata with TTL
                 transaction.set(
-                  key('chunk', chunk.id),
+                  generation_key('chunk', chunk.id),
                   chunk.to_json
                 )
-                transaction.expire(key('chunk', chunk.id), config.redis_ttl)
+                transaction.expire(generation_key('chunk', chunk.id), config.redis_ttl)
 
                 # Track all chunks for cleanup
-                transaction.sadd(key('chunks'), chunk.id)
+                transaction.sadd(generation_key('chunks'), chunk.id)
 
                 # Store dynamic timeout for this chunk
                 # Timeout = estimated_duration (in ms) converted to seconds + buffer
@@ -513,11 +565,12 @@ module CI
                 chunk_timeout = (estimated_duration_seconds * (1 + buffer_percent / 100.0)).round(2)
                 # Format to string to avoid floating point precision issues in Redis
                 # Use %g to remove trailing zeros
-                transaction.hset(key('test-group-timeout'), chunk.id, format('%g', chunk_timeout))
+                transaction.hset(generation_key('test-group-timeout'), chunk.id, format('%g', chunk_timeout))
               end
-              transaction.expire(key('chunks'), config.redis_ttl)
-              transaction.expire(key('test-group-timeout'), config.redis_ttl)
+              transaction.expire(generation_key('chunks'), config.redis_ttl)
+              transaction.expire(generation_key('test-group-timeout'), config.redis_ttl)
             end
+            renew_master_lock!
           end
         end
 
@@ -537,7 +590,7 @@ module CI
 
         def resolve_chunk(chunk_id)
           # Fetch chunk metadata from Redis
-          chunk_json = redis.get(key('chunk', chunk_id))
+          chunk_json = redis.get(generation_key('chunk', chunk_id))
           unless chunk_json
             warn "Warning: Chunk metadata not found for #{chunk_id}"
             return nil

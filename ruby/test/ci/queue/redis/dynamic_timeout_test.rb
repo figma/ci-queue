@@ -25,6 +25,11 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     @redis.flushdb if @redis
   end
 
+  def generation_prefix(build_id = '42')
+    gen = @redis.get("build:#{build_id}:current-generation")
+    gen ? "build:#{build_id}:gen:#{gen}" : "build:#{build_id}"
+  end
+
   def test_chunk_timeout_stored_in_redis_hash
     tests = create_mock_tests(['TestA#test_1', 'TestA#test_2', 'TestA#test_3'])
     test_ids = ['TestA#test_1', 'TestA#test_2', 'TestA#test_3']
@@ -38,7 +43,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
 
     # Verify timeout was stored in test-group-timeout hash
     # Timeout should be: estimated_duration (5000ms = 5s) * 1.1 buffer = 5.5s
-    chunk_timeout = @redis.hget('build:42:test-group-timeout', 'TestA:chunk_0')
+    chunk_timeout = @redis.hget("#{generation_prefix}:test-group-timeout", 'TestA:chunk_0')
     refute_nil chunk_timeout
     assert_equal '5.5', chunk_timeout
   end
@@ -54,7 +59,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       worker.populate(small_tests)
     end
 
-    small_timeout = @redis.hget('build:42:test-group-timeout', 'SmallSuite:chunk_0')
+    small_timeout = @redis.hget("#{generation_prefix}:test-group-timeout", 'SmallSuite:chunk_0')
     assert_equal '1.1', small_timeout # 1000ms = 1s * 1.1 buffer = 1.1s
 
     @redis.flushdb
@@ -69,7 +74,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       worker.populate(large_tests)
     end
 
-    large_timeout = @redis.hget('build:42:test-group-timeout', 'LargeSuite:chunk_0')
+    large_timeout = @redis.hget("#{generation_prefix}:test-group-timeout", 'LargeSuite:chunk_0')
     assert_equal '5.5', large_timeout # 5000ms = 5s * 1.1 buffer = 5.5s
   end
 
@@ -92,9 +97,9 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     end
 
     # Verify each chunk has correct timeout
-    assert_equal '2.2', @redis.hget('build:42:test-group-timeout', 'TestA:chunk_0') # 2000ms = 2s * 1.1 buffer = 2.2s
-    assert_equal '3.3', @redis.hget('build:42:test-group-timeout', 'TestB:chunk_0') # 3000ms = 3s * 1.1 buffer = 3.3s
-    assert_equal '1.1', @redis.hget('build:42:test-group-timeout', 'TestC:chunk_0') # 1000ms = 1s * 1.1 buffer = 1.1s
+    assert_equal '2.2', @redis.hget("#{generation_prefix}:test-group-timeout", 'TestA:chunk_0') # 2000ms = 2s * 1.1 buffer = 2.2s
+    assert_equal '3.3', @redis.hget("#{generation_prefix}:test-group-timeout", 'TestB:chunk_0') # 3000ms = 3s * 1.1 buffer = 3.3s
+    assert_equal '1.1', @redis.hget("#{generation_prefix}:test-group-timeout", 'TestC:chunk_0') # 1000ms = 1s * 1.1 buffer = 1.1s
   end
 
   def test_timeout_hash_has_ttl
@@ -108,7 +113,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       @worker.populate(tests)
     end
 
-    ttl = @redis.ttl('build:42:test-group-timeout')
+    ttl = @redis.ttl("#{generation_prefix}:test-group-timeout")
     assert ttl > 0, 'test-group-timeout hash should have TTL set'
     assert ttl <= @config.redis_ttl, 'TTL should not exceed config.redis_ttl'
   end
@@ -122,8 +127,8 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     end
 
     # Verify individual tests are NOT in the timeout hash
-    assert_nil @redis.hget('build:42:test-group-timeout', 'TestA#test_1')
-    assert_nil @redis.hget('build:42:test-group-timeout', 'TestB#test_1')
+    assert_nil @redis.hget("#{generation_prefix}:test-group-timeout", 'TestA#test_1')
+    assert_nil @redis.hget("#{generation_prefix}:test-group-timeout", 'TestB#test_1')
   end
 
   def test_mixed_chunks_and_tests_only_chunks_have_timeouts
@@ -145,11 +150,11 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     end
 
     # Chunks should have timeouts
-    assert_equal '2.2', @redis.hget('build:42:test-group-timeout', 'TestA:chunk_0') # 2000ms = 2s * 1.1 buffer = 2.2s
-    assert_equal '3.3', @redis.hget('build:42:test-group-timeout', 'TestC:chunk_0') # 3000ms = 3s * 1.1 buffer = 3.3s
+    assert_equal '2.2', @redis.hget("#{generation_prefix}:test-group-timeout", 'TestA:chunk_0') # 2000ms = 2s * 1.1 buffer = 2.2s
+    assert_equal '3.3', @redis.hget("#{generation_prefix}:test-group-timeout", 'TestC:chunk_0') # 3000ms = 3s * 1.1 buffer = 3.3s
 
     # Individual test should not
-    assert_nil @redis.hget('build:42:test-group-timeout', 'TestB#test_1')
+    assert_nil @redis.hget("#{generation_prefix}:test-group-timeout", 'TestB#test_1')
   end
 
   def test_reserve_test_passes_dynamic_deadline_flag
@@ -160,13 +165,14 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     end
 
     # Mock the eval_script call to verify correct parameters
+    gp = generation_prefix
     expected_keys = [
-      'build:42:queue',
-      'build:42:running',
-      'build:42:processed',
+      "#{gp}:queue",
+      "#{gp}:running",
+      "#{gp}:processed",
       'build:42:worker:1:queue',
-      'build:42:owners',
-      'build:42:test-group-timeout' # 6th key for dynamic deadline
+      "#{gp}:owners",
+      "#{gp}:test-group-timeout" # 6th key for dynamic deadline
     ]
 
     @worker.stub(:eval_script, proc { |script, keys:, argv:|
@@ -189,13 +195,14 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
       @worker.populate(tests)
     end
 
+    gp = generation_prefix
     expected_keys = [
-      'build:42:running',
-      'build:42:completed',
+      "#{gp}:running",
+      "#{gp}:processed",
       'build:42:worker:1:queue',
-      'build:42:owners',
-      'build:42:test-group-timeout', # 5th key for dynamic deadline
-      'build:42:heartbeats' # 6th key for heartbeat tracking
+      "#{gp}:owners",
+      "#{gp}:test-group-timeout", # 5th key for dynamic deadline
+      "#{gp}:heartbeats" # 6th key for heartbeat tracking
     ]
 
     @worker.stub(:eval_script, proc { |script, keys:, argv:|
@@ -244,6 +251,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     worker2_config = config.dup
     worker2_config.instance_variable_set(:@worker_id, '2')
     worker2 = CI::Queue::Redis.new(@redis_url, worker2_config)
+    worker2.send(:learn_generation)
 
     lost_test = worker2.send(:try_to_reserve_lost_test)
     assert_nil lost_test, 'Chunk should not be marked as lost before dynamic timeout'
@@ -277,6 +285,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
     worker2_config = config.dup
     worker2_config.instance_variable_set(:@worker_id, '2')
     worker2 = CI::Queue::Redis.new(@redis_url, worker2_config)
+    worker2.send(:learn_generation)
 
     lost_test = worker2.send(:try_to_reserve_lost_test)
     assert_equal 'TestA#test_1', lost_test, 'Single test should be marked as lost after default timeout'
@@ -296,7 +305,7 @@ class CI::Queue::DynamicTimeoutTest < Minitest::Test
 
     # Verify all chunks have timeouts stored despite batching
     chunks.each do |chunk|
-      timeout = @redis.hget('build:42:test-group-timeout', chunk.id)
+      timeout = @redis.hget("#{generation_prefix}:test-group-timeout", chunk.id)
       refute_nil timeout, "Chunk #{chunk.id} should have timeout stored"
       assert_equal '1.1', timeout # 1000ms = 1s * 1.1 buffer = 1.1s
     end
