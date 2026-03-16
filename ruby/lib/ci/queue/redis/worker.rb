@@ -51,6 +51,13 @@ module CI
 
               store_chunk_metadata(chunks) if chunks.any?
 
+              # Refresh lock TTL before push to prevent expiry during population
+              unless refresh_master_lock
+                @master = false
+                warn "Lock expired during population — another master may have taken over"
+                next
+              end
+
               all_ids = chunks.map(&:id) + individual_tests.map(&:id)
               push(all_ids)
             end
@@ -106,12 +113,6 @@ module CI
           idle_state_printed = false
           attempt = 0
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
-            # Check for generation staleness - another master may have taken over
-            if generation_stale?
-              warn "Generation changed - queue was repopulated by new master. Exiting poll loop."
-              break
-            end
-
             if id = reserve
               attempt = 0
               idle_since = nil
@@ -126,6 +127,12 @@ module CI
                 acknowledge(id)
               end
             else
+              # Check for generation staleness when idle - another master may have taken over
+              if generation_stale?
+                warn "Generation changed - queue was repopulated by new master. Exiting poll loop."
+                break
+              end
+
               idle_since ||= CI::Queue.time_now
               if CI::Queue.time_now - idle_since > 120 && !idle_state_printed
                 puts "Worker #{worker_id} has been idle for 120 seconds. Printing global state..."
@@ -288,25 +295,6 @@ module CI
         private
 
         attr_reader :index
-
-        def generation_key(*args)
-          gen = @generation || @current_generation
-          raise "Generation not set - call learn_generation first" unless gen
-          key('gen', gen, *args)
-        end
-
-        def learn_generation
-          @current_generation = redis.get(key('current-generation'))
-          raise MasterDied, "No generation available - master may have died" unless @current_generation
-          @current_generation
-        end
-
-        # Check if our cached generation is stale
-        def generation_stale?
-          return false unless @current_generation
-          current = redis.get(key('current-generation'))
-          current && current != @current_generation
-        end
 
         # Runs a block while sending periodic heartbeats in a background thread.
         # This prevents other workers from stealing the test while it's being executed.
@@ -485,16 +473,22 @@ module CI
           @total = tests.size
 
           if @master
-            redis.multi do |transaction|
-              transaction.lpush(generation_key('queue'), tests) unless tests.empty?
-              transaction.set(generation_key('total'), @total)
-              transaction.set(key('master-status'), 'ready')
-              transaction.set(key('current-generation'), @generation)
+            argv = [
+              "setup:#{@generation}",
+              @total.to_s,
+              @generation,
+              config.redis_ttl.to_s,
+            ] + tests
 
-              transaction.expire(generation_key('queue'), config.redis_ttl)
-              transaction.expire(generation_key('total'), config.redis_ttl)
-              transaction.expire(key('master-status'), config.redis_ttl)
-              transaction.expire(key('current-generation'), config.redis_ttl)
+            result = eval_script(
+              :push,
+              keys: [key('master-status'), generation_key('queue'), generation_key('total'), key('current-generation')],
+              argv: argv,
+            )
+
+            if result == 0
+              @master = false
+              warn "Lock lost during push — another master took over (generation #{@generation})"
             end
           end
         rescue *CONNECTION_ERRORS
@@ -540,6 +534,16 @@ module CI
         rescue *CONNECTION_ERRORS
           @master = nil
           @generation = nil
+          false
+        end
+
+        def refresh_master_lock
+          eval_script(
+            :refresh_master_lock,
+            keys: [key('master-status')],
+            argv: ["setup:#{@generation}", config.master_lock_ttl.to_s],
+          ) == 1
+        rescue *CONNECTION_ERRORS
           false
         end
 

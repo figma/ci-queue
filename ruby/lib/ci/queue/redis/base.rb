@@ -19,6 +19,7 @@ module CI
         end
 
         def exhausted?
+          return false unless current_generation
           queue_initialized? && size == 0
         end
 
@@ -70,8 +71,12 @@ module CI
 
             # Master lock expired during setup (died mid-population)
             # Status will be nil if lock expired
-            if status.nil? && last_status == 'setup'
-              raise MasterDied, "Master lock expired during setup - master may have died"
+            if status.nil?
+              if last_status == 'setup'
+                raise MasterDied, "Master lock expired during setup - master may have died"
+              elsif !redis.exists?(key('current-generation'))
+                raise MasterDied, "No master has completed setup"
+              end
             end
 
             last_status = status
@@ -114,6 +119,16 @@ module CI
           redis.get(key('master-worker-id'))
         end
 
+        def current_generation
+          @generation || @current_generation
+        end
+
+        def generation_stale?
+          return false unless @current_generation
+          current = redis.get(key('current-generation'))
+          current && current != @current_generation
+        end
+
         private
 
         attr_reader :redis, :redis_url
@@ -135,7 +150,7 @@ module CI
 
         def generation_key(*args)
           gen = @generation || @current_generation
-          return key(*args) unless gen  # Fallback for backwards compatibility
+          raise "Generation not set - call learn_generation first" unless gen
           key('gen', gen, *args)
         end
 
@@ -143,10 +158,6 @@ module CI
           @current_generation = redis.get(key('current-generation'))
           raise MasterDied, "No generation available - master may have died" unless @current_generation
           @current_generation
-        end
-
-        def current_generation
-          @generation || @current_generation
         end
 
         def eval_script(script, *args)

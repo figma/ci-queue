@@ -68,7 +68,7 @@ module CI
         timing_redis_url: nil,
         heartbeat_grace_period: 30,
         heartbeat_interval: 10,
-        master_lock_ttl: 30,
+        master_lock_ttl: 120,
         max_election_attempts: 3
       )
         @build_id = build_id
