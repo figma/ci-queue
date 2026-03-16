@@ -37,15 +37,15 @@ module CI
 
         def size
           redis.multi do |transaction|
-            transaction.llen(key('queue'))
-            transaction.zcard(key('running'))
+            transaction.llen(generation_key('queue'))
+            transaction.zcard(generation_key('running'))
           end.inject(:+)
         end
 
         def to_a
           redis.multi do |transaction|
-            transaction.lrange(key('queue'), 0, -1)
-            transaction.zrange(key('running'), 0, -1)
+            transaction.lrange(generation_key('queue'), 0, -1)
+            transaction.zrange(generation_key('running'), 0, -1)
           end.flatten.reverse.map { |k| index.fetch(k) }
         end
 
@@ -56,11 +56,25 @@ module CI
         def wait_for_master(timeout: 120)
           return true if master?
 
-          (timeout * 10 + 1).to_i.times do
-            return true if queue_initialized?
+          deadline = CI::Queue.time_now + timeout
+          last_status = nil
 
+          while CI::Queue.time_now < deadline
+            status = master_status
+
+            if status == 'ready' || status == 'finished'
+              learn_generation unless master?
+              return true
+            end
+
+            if status.nil? && last_status == 'setup'
+              raise MasterDied, "Master lock expired during setup"
+            end
+
+            last_status = status
             sleep 0.1
           end
+
           raise LostMaster, "The master worker (worker #{master_worker_id}) is still `#{master_status}` after #{timeout} seconds waiting."
         end
 
@@ -71,7 +85,14 @@ module CI
         def queue_initialized?
           @queue_initialized ||= begin
             status = master_status
-            %w[ready finished].include?(status)
+            if %w[ready finished].include?(status)
+              learn_generation unless current_generation
+              true
+            else
+              false
+            end
+          rescue MasterDied
+            false
           end
         end
 
@@ -105,12 +126,30 @@ module CI
           ['build', build_id, *args].join(':')
         end
 
+        def generation_key(*args)
+          gen = @generation || @current_generation
+          return key(*args) unless gen
+          key('gen', gen, *args)
+        end
+
+        def learn_generation
+          @current_generation = redis.get(key('current-generation'))
+          raise MasterDied, "No generation available" unless @current_generation
+          @current_generation
+        end
+
+        def current_generation
+          @generation || @current_generation
+        end
+
         def build_id
           config.build_id
         end
 
         def master_status
-          redis.get(key('master-status'))
+          status = redis.get(key('master-status'))
+          return 'setup' if status&.start_with?('setup:')
+          status
         end
 
         def eval_script(script, *args)

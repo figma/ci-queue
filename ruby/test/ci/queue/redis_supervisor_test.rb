@@ -40,7 +40,7 @@ class CI::Queue::Redis::SupervisorTest < Minitest::Test
   end
 
   def test_wait_for_workers_timeout
-    @supervisor = supervisor(timeout: 10, queue_init_timeout: 0.1)
+    @supervisor = supervisor(timeout: 0.2, queue_init_timeout: 0.5)
     io = nil
     thread = Thread.start do
       io = capture_io { @supervisor.wait_for_workers }
