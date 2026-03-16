@@ -45,7 +45,7 @@ module CI
 
           puts "Aborting, it seems all workers died." if time_left_with_no_workers <= 0
           exhausted?
-        rescue CI::Queue::Redis::LostMaster
+        rescue CI::Queue::Redis::LostMaster, CI::Queue::Redis::MasterDied
           false
         end
 

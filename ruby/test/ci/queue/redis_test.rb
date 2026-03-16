@@ -657,6 +657,158 @@ class CI::Queue::RedisTest < Minitest::Test
     assert_equal 5500.0, chunks.first.estimated_duration
   end
 
+  # --- Election recovery tests ---
+
+  def test_master_death_triggers_re_election
+    build = 'election-death'
+    w1 = worker(1, build_id: build, master_lock_ttl: 1, max_election_attempts: 3)
+    assert_predicate w1, :master?
+
+    # Simulate master death: delete the master-status key (lock expires)
+    @redis.del("build:#{build}:master-status")
+
+    # Worker 2 should detect the dead master and become the new master
+    w2 = worker(2, build_id: build, master_lock_ttl: 1, max_election_attempts: 3)
+    assert_predicate w2, :master?
+
+    # Both workers should be able to poll successfully
+    poll(w2)
+    assert_predicate w2, :exhausted?
+  end
+
+  def test_fenced_push_rejects_stale_master
+    build = 'fenced-push'
+    w1 = worker(1, build_id: build, master_lock_ttl: 30)
+    assert_predicate w1, :master?
+
+    # Overwrite master-status to simulate another master winning election
+    other_gen = 'other-generation-uuid'
+    @redis.set("build:#{build}:master-status", "setup:#{other_gen}", ex: 30)
+
+    # w1 still thinks it's master, but push.lua should reject because lock value changed
+    w1.send(:push, ['ATest#test_foo'])
+
+    # master-status should still be the other master's value
+    status = @redis.get("build:#{build}:master-status")
+    assert_equal "setup:#{other_gen}", status, "Fenced push should not overwrite another master's status"
+  end
+
+  def test_generation_stale_exits_poll
+    build = 'gen-stale'
+    w1 = worker(1, build_id: build)
+    assert_predicate w1, :master?
+
+    w2 = worker(2, build_id: build)
+    refute_predicate w2, :master?
+
+    # Drain the queue with w1 so w2 sees no tests (idle), but not exhausted
+    poll(w1)
+
+    # Change generation before w2 polls — w2 will be idle and detect staleness
+    @redis.set("build:#{build}:current-generation", "new-generation-uuid")
+
+    tests_seen = []
+    w2.poll do |test|
+      tests_seen << test
+      w2.acknowledge(test)
+    end
+
+    assert_equal 0, tests_seen.size, "Worker should exit poll immediately when generation is stale"
+  end
+
+  def test_learn_generation_raises_when_key_missing
+    build = 'learn-gen-missing'
+    w1 = worker(1, build_id: build)
+    assert_predicate w1, :master?
+
+    # Delete the current-generation key
+    @redis.del("build:#{build}:current-generation")
+
+    # A non-master worker trying to learn generation should raise MasterDied
+    assert_raises(CI::Queue::Redis::MasterDied) do
+      w2 = worker(2, build_id: build, populate: false)
+      w2.send(:learn_generation)
+    end
+  end
+
+  def test_max_election_attempts_raises_lost_master
+    build = 'max-attempts'
+
+    # Worker 1 wins master and starts setup, then dies (lock expires)
+    # We simulate this by having another process hold setup then expire
+    # To prevent the test worker from winning master, keep re-setting the key
+    # so it always sees "setup" then nil (death)
+    t = Thread.new do
+      loop do
+        # Keep setting a short-lived setup lock so the worker always sees a dying master
+        @redis.set("build:#{build}:master-status", "setup:dead-gen", px: 50)
+        sleep 0.06
+      end
+    end
+
+    assert_raises(CI::Queue::Redis::LostMaster) do
+      worker(1, build_id: build, max_election_attempts: 1, queue_init_timeout: 0.5)
+    end
+  ensure
+    t&.kill
+  end
+
+  def test_build_record_reads_generation_scoped_requeue_key
+    build = 'requeue-gen'
+    w1 = worker(1, build_id: build, max_requeues: 1, requeue_tolerance: 1.0)
+
+    w1.poll do |test|
+      w1.report_failure!
+      unless w1.requeue(test)
+        w1.acknowledge(test)
+      end
+    end
+
+    requeues = w1.build.requeued_tests
+    refute_empty requeues, "Should have requeued at least one test"
+  end
+
+  def test_supervisor_handles_master_died
+    build = 'supervisor-died'
+    supervisor = CI::Queue::Redis::Supervisor.new(
+      @redis_url,
+      CI::Queue::Configuration.new(
+        build_id: build,
+        worker_id: 'sup',
+        timeout: 0.2,
+        queue_init_timeout: 0.3,
+        timing_redis_url: @redis_url,
+      )
+    )
+
+    # wait_for_workers should return false (not crash) when no master exists
+    result = supervisor.wait_for_workers
+    refute result, "Supervisor should return false when master never appeared"
+  end
+
+  def test_wait_for_master_detects_immediate_nil_status
+    build = 'nil-status'
+
+    w = CI::Queue::Redis.new(
+      @redis_url,
+      CI::Queue::Configuration.new(
+        build_id: build,
+        worker_id: '2',
+        timeout: 0.2,
+        queue_init_timeout: 0.5,
+        timing_redis_url: @redis_url,
+      )
+    )
+
+    # Simulate that status was "setup" then expired (nil)
+    @redis.set("build:#{build}:master-status", "setup:some-gen", px: 1)
+    sleep 0.01 # Let it expire
+
+    assert_raises(CI::Queue::Redis::MasterDied) do
+      w.send(:wait_for_master, timeout: 0.5)
+    end
+  end
+
   private
 
   class MockTest
