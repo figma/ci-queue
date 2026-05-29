@@ -16,7 +16,6 @@
   "license": "ISC",
   "dependencies": {
     "@types/seedrandom": "^3.0.5",
-    "fs": "^0.0.1-security",
     "path": "^0.12.7",
     "redis": "^4.6.8",
     "seedrandom": "^3.0.5"
