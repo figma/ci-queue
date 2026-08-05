@@ -220,6 +220,50 @@ module Integration
       assert_equal 'All tests were ran already', output
     end
 
+    def test_worker_history_retry_writes_recovery_manifest
+      Dir.mktmpdir do |directory|
+        manifest_path = File.join(directory, 'recovery.json')
+        run_worker_history_worker(manifest_path, retry_count: 0)
+
+        first_manifest = JSON.parse(File.read(manifest_path))
+        assert_equal 0, first_manifest['retry_count']
+        assert_equal 0, first_manifest['history_items']
+        assert_equal 0, first_manifest['replayed_tests']
+        refute first_manifest['resumed_shared_queue']
+        assert first_manifest['replay_completed']
+
+        out, = run_worker_history_worker(manifest_path, retry_count: 1)
+
+        assert_includes out, 'Replaying 100 tests from 100 worker reservations.'
+        retry_manifest = JSON.parse(File.read(manifest_path))
+        assert_equal 1, retry_manifest['schema_version']
+        assert_equal '1', retry_manifest['worker_id']
+        assert_equal 1, retry_manifest['retry_count']
+        assert_equal 100, retry_manifest['history_items']
+        assert_equal 100, retry_manifest['replayed_tests']
+        assert retry_manifest['resumed_shared_queue']
+        assert retry_manifest['replay_completed']
+      end
+    end
+
+    def test_worker_history_retry_fails_without_worker_reservations
+      run_worker_history_worker(nil, retry_count: 0, build_id: 'missing-history', worker_id: '1')
+
+      Dir.mktmpdir do |directory|
+        manifest_path = File.join(directory, 'recovery.json')
+        out, = run_worker_history_worker(
+          manifest_path,
+          retry_count: 1,
+          build_id: 'missing-history',
+          worker_id: '2'
+        )
+
+        refute_predicate $?, :success?
+        assert_includes out, 'Reservation history is missing for worker 2'
+        refute_path_exists manifest_path
+      end
+    end
+
     def test_retry_fails_when_test_run_is_expired
       out, err = capture_subprocess_io do
         system(
@@ -787,6 +831,28 @@ module Integration
     end
 
     private
+
+    def run_worker_history_worker(manifest_path, retry_count:, build_id: 'worker-history', worker_id: '1')
+      args = [
+        @exe, 'run',
+        '--queue', @redis_url,
+        '--seed', 'foobar',
+        '--build', build_id,
+        '--worker', worker_id,
+        '--timeout', '1',
+        '--retry-mode', 'worker-history'
+      ]
+      args.push('--recovery-manifest', manifest_path) if manifest_path
+      args.push('-Itest', 'test/passing_test.rb')
+
+      capture_subprocess_io do
+        system(
+          { 'BUILDKITE_RETRY_COUNT' => retry_count.to_s },
+          *args,
+          chdir: 'test/fixtures/'
+        )
+      end
+    end
 
     def normalize_xml(output)
       freeze_xml_timing(rewrite_paths(output))

@@ -38,6 +38,19 @@ minitest-queue --queue redis://example.com run -Itest test/**/*_test.rb
 
 Additionally you can configure the requeue settings (see main README) with `--max-requeues` and `--requeue-tolerance`.
 
+To recover artifacts lost with a retried distributed worker, replay every test
+reserved by that worker before resuming the shared queue:
+
+```bash
+minitest-queue --queue redis://example.com \
+  --retry-mode worker-history \
+  --recovery-manifest log/ci-queue-recovery.json \
+  run -Itest test/**/*_test.rb
+```
+
+This mode requires the retry to retain its worker ID and queue build ID. It
+fails when the worker's reservation history or suite chunk metadata is missing.
+
 
 If you'd like to centralize the error reporting you can do so with:
 

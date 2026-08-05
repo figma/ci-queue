@@ -33,10 +33,20 @@ module CI::Queue
         'BUILDKITE_BUILD_ID' => '9e08ef3c-d6e6-4a86-91dd-577ce5205b8e',
         'BUILDKITE_PARALLEL_JOB' => '12',
         'BUILDKITE_COMMIT' => 'faa647bbb8168a77cf338e7488c3f8445c3e6554',
+        'BUILDKITE_RETRY_COUNT' => '2',
       )
       assert_equal '9e08ef3c-d6e6-4a86-91dd-577ce5205b8e', config.build_id
       assert_equal '12', config.worker_id
       assert_equal 'faa647bbb8168a77cf338e7488c3f8445c3e6554', config.seed
+      assert_equal 2, config.retry_count
+    end
+
+    def test_retry_defaults
+      config = Configuration.new
+
+      assert_equal :failures, config.retry_mode
+      assert_equal 0, config.retry_count
+      assert_nil config.recovery_manifest
     end
 
     def test_travis_defaults

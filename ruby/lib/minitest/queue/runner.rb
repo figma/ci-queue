@@ -54,12 +54,16 @@ module Minitest
             abort! "The test run is too old and can't be retried"
           end
           reset_counters
-          retry_queue = queue.retry_queue
-          if retry_queue.exhausted?
-            puts "The retry queue does not contain any failure, we'll process the main queue instead."
+          if worker_history_retry?
+            recover_worker_history
           else
-            puts "Retrying failed tests."
-            self.queue = retry_queue
+            retry_queue = queue.retry_queue
+            if retry_queue.exhausted?
+              puts "The retry queue does not contain any failure, we'll process the main queue instead."
+            else
+              puts "Retrying failed tests."
+              self.queue = retry_queue
+            end
           end
         end
 
@@ -80,6 +84,13 @@ module Minitest
         end
         if queue_config.statsd_endpoint
           reporters << Minitest::Reporters::StatsdReporter.new(statsd_endpoint: queue_config.statsd_endpoint)
+        end
+        if queue_config.recovery_manifest
+          reporters << RecoveryReporter.new(
+            path: queue_config.recovery_manifest,
+            queue: queue,
+            config: queue_config
+          )
         end
         Minitest.queue_reporters = reporters
 
@@ -324,6 +335,22 @@ module Minitest
         queue.build.reset_stats(BuildStatusRecorder::COUNTERS)
       end
 
+      def recover_worker_history
+        unless queue.distributed? && queue.respond_to?(:worker_history)
+          abort! 'Worker history recovery requires a distributed Redis queue'
+        end
+
+        history = queue.worker_history
+        puts "Replaying #{history.test_ids.size} tests from #{history.history_items} worker reservations."
+        self.queue = CI::Queue::WorkerHistoryRecovery.new(queue, history)
+      rescue CI::Queue::Redis::WorkerHistoryError => error
+        abort! error.message
+      end
+
+      def worker_history_retry?
+        queue_config.retry_mode == :worker_history
+      end
+
       def populate_queue
         Minitest.queue.populate(Minitest.loaded_tests, random: ordering_seed, &:id)
       end
@@ -492,6 +519,22 @@ module Minitest
           opts.separator ""
           opts.on('--worker WORKER_ID', help) do |worker_id|
             queue_config.worker_id = worker_id
+          end
+
+          help = <<~EOS
+            Retry behavior: failures (default) or worker-history.
+          EOS
+          opts.separator ""
+          opts.on('--retry-mode MODE', %w[failures worker-history], help) do |mode|
+            queue_config.retry_mode = mode.tr('-', '_').to_sym
+          end
+
+          help = <<~EOS
+            Write worker-history recovery details to a JSON file after a completed run.
+          EOS
+          opts.separator ""
+          opts.on('--recovery-manifest PATH', help) do |path|
+            queue_config.recovery_manifest = path
           end
 
           help = <<~EOS
