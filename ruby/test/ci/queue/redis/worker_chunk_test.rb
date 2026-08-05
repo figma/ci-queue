@@ -243,6 +243,49 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
   end
 
+  def test_worker_history_expands_chunks_and_deduplicates_tests
+    tests = create_mock_tests(['TestA#test_1', 'TestA#test_2', 'TestB#test_1'])
+    chunk = CI::Queue::TestChunk.new(
+      'TestA:chunk_0',
+      'TestA',
+      ['TestA#test_1', 'TestA#test_2'],
+      2000.0
+    )
+
+    @worker.stub(:reorder_tests, [chunk, tests.last]) do
+      @worker.populate(tests)
+    end
+
+    history_key = 'build:42:worker:1:queue'
+    @redis.del(history_key)
+    [chunk.id, tests.last.id, chunk.id, tests[1].id].each do |id|
+      @redis.lpush(history_key, id)
+    end
+
+    history = @worker.worker_history
+
+    assert_equal 4, history.history_items
+    assert_equal ['TestA#test_1', 'TestA#test_2', 'TestB#test_1'], history.test_ids
+  end
+
+  def test_worker_history_requires_reservations
+    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
+      @worker.worker_history
+    end
+
+    assert_equal 'Reservation history is missing for worker 1', error.message
+  end
+
+  def test_worker_history_requires_chunk_metadata
+    @redis.lpush('build:42:worker:1:queue', 'TestA:chunk_0')
+
+    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
+      @worker.worker_history
+    end
+
+    assert_equal 'Chunk metadata is missing for TestA:chunk_0', error.message
+  end
+
   private
 
   def create_mock_tests(test_ids)

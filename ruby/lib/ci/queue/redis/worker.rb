@@ -16,6 +16,15 @@ module CI
       self.max_sleep_time = 2
 
       class Worker < Base
+        class WorkerHistory
+          attr_reader :history_items, :test_ids
+
+          def initialize(history_items:, test_ids:)
+            @history_items = history_items
+            @test_ids = test_ids.freeze
+          end
+        end
+
         DEFAULT_SLEEP_SECONDS = 0.5
         attr_reader :total
 
@@ -152,6 +161,25 @@ module CI
           log.uniq!
           log.reverse!
           Retry.new(log, config, redis: redis)
+        end
+
+        def worker_history
+          reservations = redis.lrange(key('worker', worker_id, 'queue'), 0, -1)
+          if reservations.empty?
+            raise WorkerHistoryError, "Reservation history is missing for worker #{worker_id}"
+          end
+
+          seen = {}
+          test_ids = reservations.reverse_each.each_with_object([]) do |reservation_id, ids|
+            expand_reservation(reservation_id).each do |test_id|
+              next if seen[test_id]
+
+              seen[test_id] = true
+              ids << test_id
+            end
+          end
+
+          WorkerHistory.new(history_items: reservations.size, test_ids: test_ids)
         end
 
         def supervisor
@@ -523,6 +551,24 @@ module CI
 
         def chunk_id?(id)
           id.include?(':chunk_')
+        end
+
+        def expand_reservation(id)
+          return [id] unless chunk_id?(id)
+
+          chunk_json = redis.get(key('chunk', id))
+          unless chunk_json
+            raise WorkerHistoryError, "Chunk metadata is missing for #{id}"
+          end
+
+          test_ids = CI::Queue::TestChunk.from_json(id, chunk_json).test_ids
+          if test_ids.empty?
+            raise WorkerHistoryError, "Chunk metadata contains no tests for #{id}"
+          end
+
+          test_ids
+        rescue JSON::ParserError => error
+          raise WorkerHistoryError, "Chunk metadata is invalid for #{id}: #{error.message}"
         end
 
         def resolve_executable(id)
