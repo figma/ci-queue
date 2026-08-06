@@ -61,6 +61,47 @@ class CI::Queue::WorkerHistoryRecoveryTest < Minitest::Test
     assert_equal [], shared_queue.acknowledged
   end
 
+  def test_circuit_breaker_on_last_replay_does_not_resume_shared_queue
+    config = CI::Queue::Configuration.new(max_consecutive_failures: 1)
+    shared_queue = SharedQueue.new(['TestB#test_1'], config: config)
+    history = History.new(1, ['TestA#test_1'])
+    queue = CI::Queue::WorkerHistoryRecovery.new(shared_queue, history)
+    queue.populate(tests('TestA#test_1', 'TestB#test_1'))
+
+    order = []
+    queue.poll do |test|
+      order << test.id
+      queue.report_failure!
+      queue.acknowledge(test)
+    end
+
+    assert_equal ['TestA#test_1'], order
+    refute queue.replay_completed?
+    refute queue.resumed_shared_queue?
+    assert_equal [], shared_queue.acknowledged
+  end
+
+  def test_max_failures_on_last_replay_does_not_resume_shared_queue
+    config = CI::Queue::Configuration.new(max_test_failed: 1)
+    shared_queue = SharedQueue.new(['TestB#test_1'], config: config)
+    history = History.new(1, ['TestA#test_1'])
+    queue = CI::Queue::WorkerHistoryRecovery.new(shared_queue, history)
+    queue.populate(tests('TestA#test_1', 'TestB#test_1'))
+
+    order = []
+    queue.poll do |test|
+      order << test.id
+      queue.increment_test_failed
+      queue.acknowledge(test)
+    end
+
+    assert_equal ['TestA#test_1'], order
+    assert_equal 1, queue.test_failed
+    refute queue.replay_completed?
+    refute queue.resumed_shared_queue?
+    assert_equal [], shared_queue.acknowledged
+  end
+
   def test_missing_replay_test_fails_before_resuming_shared_queue
     shared_queue = SharedQueue.new(['TestB#test_1'])
     history = History.new(1, ['MissingTest#test_1'])

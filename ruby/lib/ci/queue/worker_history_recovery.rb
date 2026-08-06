@@ -38,6 +38,7 @@ module CI
         end
 
         return unless @replay_ids.empty?
+        return unless replay_allowed?
 
         @replay_completed = true
         @resumed_shared_queue = true
