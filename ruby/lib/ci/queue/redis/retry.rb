@@ -12,6 +12,14 @@ module CI
           @build ||= CI::Queue::Redis::BuildRecord.new(self, redis, config)
         end
 
+        def poll
+          super
+          return unless config.retry_mode == :worker_history
+          return if exhausted?
+
+          raise IncompleteRetry, 'Worker history replay stopped before completion'
+        end
+
         private
 
         attr_reader :redis
