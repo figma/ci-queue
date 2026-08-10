@@ -264,45 +264,20 @@ module Integration
       assert_equal "The test run is too old and can't be retried", output
     end
 
-    def test_worker_history_retry_writes_recovery_manifest
-      Dir.mktmpdir do |directory|
-        manifest_path = File.join(directory, 'recovery.json')
-        run_worker_history_worker(manifest_path, retry_count: 0)
+    def test_worker_history_retry_replays_worker_reservations
+      run_worker_history_worker(retry_count: 0)
+      out, = run_worker_history_worker(retry_count: 1)
 
-        first_manifest = JSON.parse(File.read(manifest_path))
-        assert_equal 0, first_manifest['retry_count']
-        refute first_manifest['resumed_shared_queue']
-        assert first_manifest['replay_completed']
-
-        out, = run_worker_history_worker(manifest_path, retry_count: 1)
-
-        assert_includes out, "Replaying this worker's reservation history."
-        retry_manifest = JSON.parse(File.read(manifest_path))
-        assert_equal 1, retry_manifest['schema_version']
-        assert_equal '1', retry_manifest['worker_id']
-        assert_equal 1, retry_manifest['retry_count']
-        refute retry_manifest['resumed_shared_queue']
-        assert retry_manifest['replay_completed']
-      end
+      assert_predicate $?, :success?
+      assert_includes out, "Replaying this worker's reservation history."
     end
 
-    def test_worker_history_retry_removes_stale_manifest_when_history_is_missing
-      run_worker_history_worker(nil, retry_count: 0, build_id: 'missing-history', worker_id: '1')
+    def test_worker_history_retry_fails_when_history_is_missing
+      run_worker_history_worker(retry_count: 0, build_id: 'missing-history', worker_id: '1')
+      out, err = run_worker_history_worker(retry_count: 1, build_id: 'missing-history', worker_id: '2')
 
-      Dir.mktmpdir do |directory|
-        manifest_path = File.join(directory, 'recovery.json')
-        File.write(manifest_path, '{"stale":true}')
-        out, = run_worker_history_worker(
-          manifest_path,
-          retry_count: 1,
-          build_id: 'missing-history',
-          worker_id: '2'
-        )
-
-        refute_predicate $?, :success?
-        assert_includes out, 'Reservation history is missing for worker 2'
-        refute_path_exists manifest_path
-      end
+      refute_predicate $?, :success?
+      assert_includes out + err, 'Reservation history is missing for worker 2'
     end
 
     def test_retry_report
@@ -829,7 +804,7 @@ module Integration
 
     private
 
-    def run_worker_history_worker(manifest_path, retry_count:, build_id: 'worker-history', worker_id: '1')
+    def run_worker_history_worker(retry_count:, build_id: 'worker-history', worker_id: '1')
       args = [
         @exe, 'run',
         '--queue', @redis_url,
@@ -839,7 +814,6 @@ module Integration
         '--timeout', '1',
         '--retry-mode', 'worker-history'
       ]
-      args.push('--recovery-manifest', manifest_path) if manifest_path
       args.push('-Itest', 'test/passing_test.rb')
 
       capture_subprocess_io do

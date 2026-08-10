@@ -145,9 +145,8 @@ module CI
           end
         end
 
-        def retry_queue(scope: :failures)
-          return worker_history_retry_queue if scope == :worker_history
-          raise ArgumentError, "Unknown retry scope: #{scope}" unless scope == :failures
+        def retry_queue
+          return worker_history_retry_queue if config.retry_mode == :worker_history
 
           failures = build.failed_tests.to_set
           log = redis.lrange(key('worker', worker_id, 'queue'), 0, -1)

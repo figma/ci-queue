@@ -47,13 +47,11 @@ previously reserved by that worker:
 ```bash
 minitest-queue --queue redis://example.com run \
   --retry-mode worker-history \
-  --recovery-manifest tmp/ci-queue-recovery.json \
   -Itest test/**/*_test.rb
 ```
 
 The replay uses the existing local retry queue and exits after the worker history
-is exhausted. It does not claim additional work from the shared Redis queue. The
-manifest is written atomically only after a complete run.
+is exhausted. It does not claim additional work from the shared Redis queue.
 
 
 If you'd like to centralize the error reporting you can do so with:
