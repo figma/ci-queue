@@ -38,21 +38,6 @@ minitest-queue --queue redis://example.com run -Itest test/**/*_test.rb
 
 Additionally you can configure the requeue settings (see main README) with `--max-requeues` and `--requeue-tolerance`.
 
-#### Replaying a retried worker for coverage
-
-By default, a retried worker runs only tests recorded as failed. For process-local
-artifacts such as SimpleCov output, use worker-history mode to replay every test
-previously reserved by that worker:
-
-```bash
-minitest-queue --queue redis://example.com run \
-  --retry-mode worker-history \
-  -Itest test/**/*_test.rb
-```
-
-The replay uses the existing local retry queue and exits after the worker history
-is exhausted. It does not claim additional work from the shared Redis queue.
-
 
 If you'd like to centralize the error reporting you can do so with:
 
