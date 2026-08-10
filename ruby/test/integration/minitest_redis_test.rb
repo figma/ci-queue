@@ -271,20 +271,16 @@ module Integration
 
         first_manifest = JSON.parse(File.read(manifest_path))
         assert_equal 0, first_manifest['retry_count']
-        assert_equal 0, first_manifest['history_items']
-        assert_equal 0, first_manifest['replayed_tests']
         refute first_manifest['resumed_shared_queue']
         assert first_manifest['replay_completed']
 
         out, = run_worker_history_worker(manifest_path, retry_count: 1)
 
-        assert_includes out, 'Replaying 100 tests from 100 worker reservations.'
+        assert_includes out, "Replaying this worker's reservation history."
         retry_manifest = JSON.parse(File.read(manifest_path))
         assert_equal 1, retry_manifest['schema_version']
         assert_equal '1', retry_manifest['worker_id']
         assert_equal 1, retry_manifest['retry_count']
-        assert_equal 100, retry_manifest['history_items']
-        assert_equal 100, retry_manifest['replayed_tests']
         refute retry_manifest['resumed_shared_queue']
         assert retry_manifest['replay_completed']
       end

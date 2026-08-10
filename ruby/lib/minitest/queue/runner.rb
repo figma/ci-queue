@@ -61,7 +61,7 @@ module Minitest
             puts "The retry queue does not contain any failure, we'll process the main queue instead."
           else
             if worker_history_retry?
-              puts "Replaying #{retry_queue.replayed_tests} tests from #{retry_queue.history_items} worker reservations."
+              puts "Replaying this worker's reservation history."
             else
               puts "Retrying failed tests."
             end

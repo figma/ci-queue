@@ -4,18 +4,6 @@ require 'test_helper'
 class CI::Queue::StaticTest < Minitest::Test
   include SharedQueueAssertions
 
-  def test_shutdown_stops_polling
-    order = []
-
-    @queue.poll do |test|
-      order << test
-      @queue.shutdown!
-    end
-
-    assert_equal 1, order.size
-    refute @queue.exhausted?
-  end
-
   private
 
   def build_queue

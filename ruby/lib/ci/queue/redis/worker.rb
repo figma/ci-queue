@@ -283,13 +283,7 @@ module CI
             end
           end
 
-          Retry.new(
-            test_ids,
-            config,
-            redis: redis,
-            history_items: reservations.size,
-            worker_history: true
-          )
+          Retry.new(test_ids, config, redis: redis)
         end
 
         # Runs a block while sending periodic heartbeats in a background thread.

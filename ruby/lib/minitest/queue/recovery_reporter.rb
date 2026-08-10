@@ -18,7 +18,7 @@ module Minitest
       def report
         super
         return unless queue.exhausted?
-        return if worker_history_retry? && !queue.worker_history_complete?
+        return if worker_history_retry? && !queue.poll_completed?
 
         directory = File.dirname(path)
         FileUtils.mkdir_p(directory)
@@ -37,7 +37,7 @@ module Minitest
       attr_reader :config, :path, :queue
 
       def worker_history_retry?
-        queue.respond_to?(:worker_history?) && queue.worker_history?
+        config.retry_mode == :worker_history && queue.respond_to?(:poll_completed?)
       end
 
       def manifest
@@ -45,10 +45,8 @@ module Minitest
           schema_version: 1,
           worker_id: config.worker_id.to_s,
           retry_count: config.retry_count,
-          history_items: worker_history_retry? ? queue.history_items : 0,
-          replayed_tests: worker_history_retry? ? queue.replayed_tests : 0,
           resumed_shared_queue: false,
-          replay_completed: !worker_history_retry? || queue.worker_history_complete?
+          replay_completed: !worker_history_retry? || queue.poll_completed?
         }
       end
     end

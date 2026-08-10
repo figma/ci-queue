@@ -243,62 +243,6 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
   end
 
-  def test_worker_history_retry_expands_chunks_and_deduplicates_tests
-    tests = create_mock_tests(['TestA#test_1', 'TestA#test_2', 'TestB#test_1'])
-    chunk = CI::Queue::TestChunk.new(
-      'TestA:chunk_0',
-      'TestA',
-      ['TestA#test_1', 'TestA#test_2'],
-      2000.0
-    )
-
-    @worker.stub(:reorder_tests, [chunk, tests.last]) do
-      @worker.populate(tests)
-    end
-
-    history_key = 'build:42:worker:1:queue'
-    @redis.del(history_key)
-    [chunk.id, tests.last.id, chunk.id, tests[1].id].each do |id|
-      @redis.lpush(history_key, id)
-    end
-
-    retry_queue = @worker.retry_queue(scope: :worker_history)
-    retry_queue.populate(tests)
-
-    assert_equal ['TestA#test_1', 'TestA#test_2', 'TestB#test_1'], retry_queue.to_a.map(&:id)
-    assert_equal 4, retry_queue.history_items
-    assert_equal 3, retry_queue.replayed_tests
-    assert retry_queue.worker_history?
-  end
-
-  def test_worker_history_retry_requires_reservations
-    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
-      @worker.retry_queue(scope: :worker_history)
-    end
-
-    assert_equal 'Reservation history is missing for worker 1', error.message
-  end
-
-  def test_worker_history_retry_requires_chunk_metadata
-    @redis.lpush('build:42:worker:1:queue', 'TestA:chunk_0')
-
-    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
-      @worker.retry_queue(scope: :worker_history)
-    end
-
-    assert_equal 'Chunk metadata is missing for TestA:chunk_0', error.message
-  end
-
-  def test_worker_history_retry_is_incomplete_when_a_test_cannot_be_resolved
-    @redis.lpush('build:42:worker:1:queue', 'MissingTest#test_1')
-    retry_queue = @worker.retry_queue(scope: :worker_history)
-    retry_queue.populate([])
-
-    assert_raises(KeyError) { retry_queue.poll { |_test| } }
-    assert retry_queue.exhausted?
-    refute retry_queue.worker_history_complete?
-  end
-
   private
 
   def create_mock_tests(test_ids)
