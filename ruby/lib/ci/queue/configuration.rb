@@ -15,6 +15,7 @@ module CI
       attr_accessor :timing_redis_url
       attr_accessor :write_duration_averages
       attr_accessor :heartbeat_grace_period, :heartbeat_interval
+      attr_accessor :retry_mode, :recovery_manifest, :retry_count
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
       attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
@@ -30,6 +31,7 @@ module CI
             redis_ttl: env['CI_QUEUE_REDIS_TTL']&.to_i ||  8 * 60 * 60,
             known_flaky_tests: load_known_flaky_tests(env['CI_QUEUE_KNOWN_FLAKY_TESTS']),
             branch: env['BUILDKITE_BRANCH'],
+            retry_count: env['BUILDKITE_RETRY_COUNT'].to_i,
           )
         end
 
@@ -66,7 +68,10 @@ module CI
         branch: nil,
         timing_redis_url: nil,
         heartbeat_grace_period: 30,
-        heartbeat_interval: 10
+        heartbeat_interval: 10,
+        retry_mode: :failures,
+        recovery_manifest: nil,
+        retry_count: 0
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
@@ -105,6 +110,9 @@ module CI
         @write_duration_averages = false
         @heartbeat_grace_period = heartbeat_grace_period
         @heartbeat_interval = heartbeat_interval
+        @retry_mode = retry_mode
+        @recovery_manifest = recovery_manifest
+        @retry_count = retry_count
       end
 
       def queue_init_timeout

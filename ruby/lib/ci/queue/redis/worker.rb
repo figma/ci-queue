@@ -145,7 +145,10 @@ module CI
           end
         end
 
-        def retry_queue
+        def retry_queue(scope: :failures)
+          return worker_history_retry_queue if scope == :worker_history
+          raise ArgumentError, "Unknown retry scope: #{scope}" unless scope == :failures
+
           failures = build.failed_tests.to_set
           log = redis.lrange(key('worker', worker_id, 'queue'), 0, -1)
           log.select! { |id| failures.include?(id) }
@@ -263,6 +266,31 @@ module CI
         private
 
         attr_reader :index
+
+        def worker_history_retry_queue
+          reservations = redis.lrange(key('worker', worker_id, 'queue'), 0, -1)
+          if reservations.empty?
+            raise WorkerHistoryError, "Reservation history is missing for worker #{worker_id}"
+          end
+
+          seen = {}
+          test_ids = reservations.reverse_each.each_with_object([]) do |reservation_id, ids|
+            expand_reservation(reservation_id).each do |test_id|
+              next if seen[test_id]
+
+              seen[test_id] = true
+              ids << test_id
+            end
+          end
+
+          Retry.new(
+            test_ids,
+            config,
+            redis: redis,
+            history_items: reservations.size,
+            worker_history: true
+          )
+        end
 
         # Runs a block while sending periodic heartbeats in a background thread.
         # This prevents other workers from stealing the test while it's being executed.
@@ -523,6 +551,20 @@ module CI
 
         def chunk_id?(id)
           id.include?(':chunk_')
+        end
+
+        def expand_reservation(id)
+          return [id] unless chunk_id?(id)
+
+          chunk_json = redis.get(key('chunk', id))
+          raise WorkerHistoryError, "Chunk metadata is missing for #{id}" unless chunk_json
+
+          test_ids = CI::Queue::TestChunk.from_json(id, chunk_json).test_ids
+          raise WorkerHistoryError, "Chunk metadata contains no tests for #{id}" if test_ids.empty?
+
+          test_ids
+        rescue JSON::ParserError => error
+          raise WorkerHistoryError, "Chunk metadata is invalid for #{id}: #{error.message}"
         end
 
         def resolve_executable(id)
