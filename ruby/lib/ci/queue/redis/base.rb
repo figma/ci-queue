@@ -53,12 +53,19 @@ module CI
           total - size
         end
 
-        def wait_for_master(timeout: 120)
+        def wait_for_master(timeout: 120, fail_if_unclaimed: false)
           return true if master?
 
+          last_status = nil
           (timeout * 10 + 1).to_i.times do
-            return true if queue_initialized?
+            status = master_status
+            return true if %w[ready finished].include?(status)
 
+            if status.nil? && (last_status == 'setup' || fail_if_unclaimed)
+              raise MasterDied, 'The master lease expired during queue setup.'
+            end
+
+            last_status = status
             sleep 0.1
           end
           raise LostMaster, "The master worker (worker #{master_worker_id}) is still `#{master_status}` after #{timeout} seconds waiting."
@@ -110,7 +117,10 @@ module CI
         end
 
         def master_status
-          redis.get(key('master-status'))
+          status = redis.get(key('master-status'))
+          return 'setup' if status&.start_with?('setup:')
+
+          status
         end
 
         def eval_script(script, *args)

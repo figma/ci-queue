@@ -2,6 +2,7 @@
 
 require 'ci/queue/static'
 require 'concurrent/set'
+require 'securerandom'
 
 module CI
   module Queue
@@ -38,19 +39,41 @@ module CI
           @index = tests.map { |t| [t.id, t] }.to_h
           @total = tests.size
 
-          if acquire_master_role?
-            executables = reorder_tests(tests, random: random)
+          election_attempts = 0
 
-            chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
-            individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
+          loop do
+            begin
+              if acquire_master_role?
+                all_ids = with_master_lock_renewal do
+                  executables = reorder_tests(tests, random: random)
 
-            store_chunk_metadata(chunks) if chunks.any?
+                  chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
+                  individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
 
-            all_ids = chunks.map(&:id) + individual_tests.map(&:id)
-            push(all_ids)
+                  store_chunk_metadata(chunks) if chunks.any?
+
+                  chunks.map(&:id) + individual_tests.map(&:id)
+                end
+                push(all_ids)
+              else
+                wait_for_master(timeout: config.queue_init_timeout, fail_if_unclaimed: true)
+              end
+
+              register_worker_presence
+              break
+            rescue MasterDied => error
+              election_attempts += 1
+              if election_attempts >= config.max_election_attempts
+                raise LostMaster,
+                  "Failed to recover queue setup after #{election_attempts} election attempts: #{error.message}"
+              end
+
+              warn 'Master worker died during setup; retrying election ' \
+                "(#{election_attempts}/#{config.max_election_attempts})."
+              @master = nil
+              @generation = nil
+            end
           end
-
-          register_worker_presence
 
           self
         end
@@ -441,15 +464,23 @@ module CI
           @total = tests.size
 
           if @master
-            redis.multi do |transaction|
-              transaction.lpush(key('queue'), tests) unless tests.empty?
-              transaction.set(key('total'), @total)
-              transaction.set(key('master-status'), 'ready')
-
-              transaction.expire(key('queue'), config.redis_ttl)
-              transaction.expire(key('total'), config.redis_ttl)
-              transaction.expire(key('master-status'), config.redis_ttl)
-            end
+            result = eval_script(
+              :push_queue,
+              keys: [
+                key('master-status'),
+                key('queue'),
+                key('total'),
+                key('current-generation')
+              ],
+              argv: [
+                master_lock_value,
+                @generation,
+                @total,
+                config.redis_ttl,
+                *tests
+              ]
+            )
+            raise MasterDied, 'The master lease was lost before the queue could be published.' unless result == 1
           end
         rescue *CONNECTION_ERRORS
           raise if @master
@@ -462,22 +493,87 @@ module CI
         def acquire_master_role?
           return true if @master
 
-          @master = redis.setnx(key('master-status'), 'setup')
+          @generation = SecureRandom.uuid
+          @master = redis.set(
+            key('master-status'),
+            master_lock_value,
+            nx: true,
+            ex: config.master_lock_ttl
+          )
           if @master
             begin
-              redis.set(key('master-worker-id'), worker_id)
-              redis.expire(key('master-worker-id'), config.redis_ttl)
-              warn "Worker #{worker_id} elected as master"
+              redis.multi do |transaction|
+                transaction.set(key('master-worker-id'), worker_id)
+                transaction.expire(key('master-worker-id'), config.redis_ttl)
+              end
+              warn "Worker #{worker_id} elected as master (generation #{@generation})"
             rescue *CONNECTION_ERRORS
               # If setting master-worker-id fails, we still have master status
               # Log but don't lose master role
               warn("Failed to set master-worker-id: #{$!.message}")
             end
+          else
+            @generation = nil
           end
           @master
         rescue *CONNECTION_ERRORS
           @master = nil
+          @generation = nil
           false
+        end
+
+        def master_lock_value
+          "setup:#{@generation}"
+        end
+
+        def renew_master_lock!
+          result = eval_script(
+            :renew_master_lock,
+            keys: [key('master-status')],
+            argv: [master_lock_value, config.master_lock_ttl]
+          )
+          raise MasterDied, 'The master lease expired while the queue was being populated.' unless result == 1
+        end
+
+        def with_master_lock_renewal
+          renewal_interval = [config.master_lock_ttl / 3.0, 0.1].max
+          lock_lost = false
+          stop_renewal = false
+          script = read_script(:renew_master_lock)
+          status_key = key('master-status')
+          expected_lock = master_lock_value
+
+          renewal_thread = Thread.new do
+            renewal_redis = ::Redis.new(url: redis_url)
+            until stop_renewal
+              sleep renewal_interval
+              break if stop_renewal
+
+              result = renewal_redis.eval(
+                script,
+                keys: [status_key],
+                argv: [expected_lock, config.master_lock_ttl]
+              )
+              unless result == 1
+                lock_lost = true
+                break
+              end
+            end
+          rescue *CONNECTION_ERRORS => error
+            warn "Failed to renew the master lease: #{error.message}"
+          ensure
+            renewal_redis&.close
+          end
+
+          result = yield
+          raise MasterDied, 'The master lease expired while the queue was being populated.' if lock_lost
+
+          renew_master_lock!
+          result
+        ensure
+          stop_renewal = true
+          renewal_thread&.kill
+          renewal_thread&.join
         end
 
         def register_worker_presence
@@ -493,31 +589,29 @@ module CI
           batch_size = 5 # 5 chunks = 20 commands + 2 expires = 22 commands per batch
 
           chunks.each_slice(batch_size) do |chunk_batch|
-            redis.multi do |transaction|
-              chunk_batch.each do |chunk|
-                # Store chunk metadata with TTL
-                transaction.set(
-                  key('chunk', chunk.id),
-                  chunk.to_json
-                )
-                transaction.expire(key('chunk', chunk.id), config.redis_ttl)
-
-                # Track all chunks for cleanup
-                transaction.sadd(key('chunks'), chunk.id)
-
-                # Store dynamic timeout for this chunk
-                # Timeout = estimated_duration (in ms) converted to seconds + buffer
-                # estimated_duration is in milliseconds, convert to seconds and add 10% buffer
-                buffer_percent = 10
-                estimated_duration_seconds = chunk.estimated_duration / 1000.0
-                chunk_timeout = (estimated_duration_seconds * (1 + buffer_percent / 100.0)).round(2)
-                # Format to string to avoid floating point precision issues in Redis
-                # Use %g to remove trailing zeros
-                transaction.hset(key('test-group-timeout'), chunk.id, format('%g', chunk_timeout))
-              end
-              transaction.expire(key('chunks'), config.redis_ttl)
-              transaction.expire(key('test-group-timeout'), config.redis_ttl)
+            chunk_keys = chunk_batch.map { |chunk| key('chunk', chunk.id) }
+            chunk_data = chunk_batch.flat_map do |chunk|
+              # Timeout = estimated duration in seconds plus a 10% buffer.
+              chunk_timeout = (chunk.estimated_duration / 1000.0 * 1.1).round(2)
+              [chunk.id, chunk.to_json, format('%g', chunk_timeout)]
             end
+
+            result = eval_script(
+              :store_chunk_metadata,
+              keys: [
+                key('master-status'),
+                key('chunks'),
+                key('test-group-timeout'),
+                *chunk_keys
+              ],
+              argv: [
+                master_lock_value,
+                config.master_lock_ttl,
+                config.redis_ttl,
+                *chunk_data
+              ]
+            )
+            raise MasterDied, 'The master lease was lost while storing chunk metadata.' unless result == 1
           end
         end
 

@@ -18,6 +18,7 @@ module CI
     module Redis
       Error = Class.new(StandardError)
       LostMaster = Class.new(Error)
+      MasterDied = Class.new(Error)
 
       class << self
 

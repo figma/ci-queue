@@ -73,6 +73,13 @@ module CI::Queue
       assert_equal(28_800, config.redis_ttl)
     end
 
+    def test_master_election_defaults
+      config = Configuration.new
+
+      assert_equal 30, config.master_lock_ttl
+      assert_equal 3, config.max_election_attempts
+    end
+
     def test_redis_ttl_from_env
       config = Configuration.from_env(
         "CI_QUEUE_REDIS_TTL" => "14400"
