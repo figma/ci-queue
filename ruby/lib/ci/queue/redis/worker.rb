@@ -56,7 +56,9 @@ module CI
                 end
                 push(all_ids)
               else
-                wait_for_master(timeout: config.queue_init_timeout, fail_if_unclaimed: true)
+                rescue_connection_errors do
+                  wait_for_master(timeout: config.queue_init_timeout, fail_if_unclaimed: true)
+                end
               end
 
               register_worker_presence
