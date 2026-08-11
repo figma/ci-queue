@@ -241,6 +241,23 @@ module Integration
       assert_includes out, 'Reservation history is missing for worker 2'
     end
 
+    def test_worker_history_retry_fails_when_replay_stops_early
+      run_worker_history_worker(
+        retry_count: 0,
+        build_id: 'incomplete-history',
+        test_file: 'test/failing_test.rb'
+      )
+      out, err = run_worker_history_worker(
+        retry_count: 1,
+        build_id: 'incomplete-history',
+        test_file: 'test/failing_test.rb',
+        extra_args: ['--max-consecutive-failures', '1']
+      )
+
+      refute_predicate $?, :success?
+      assert_includes out + err, 'Worker history replay stopped before completion'
+    end
+
     def test_retry_fails_when_test_run_is_expired
       out, err = capture_subprocess_io do
         system(
@@ -809,19 +826,29 @@ module Integration
 
     private
 
-    def run_worker_history_worker(retry_count:, build_id: 'worker-history', worker_id: '1')
+    def run_worker_history_worker(
+      retry_count:,
+      build_id: 'worker-history',
+      worker_id: '1',
+      test_file: 'test/passing_test.rb',
+      extra_args: []
+    )
+      args = [
+        @exe, 'run',
+        '--queue', @redis_url,
+        '--seed', 'foobar',
+        '--build', build_id,
+        '--worker', worker_id,
+        '--timeout', '1',
+        '--retry-selection', 'worker-history'
+      ]
+      args.concat(extra_args)
+      args.push('-Itest', test_file)
+
       capture_subprocess_io do
         system(
           { 'BUILDKITE_RETRY_COUNT' => retry_count.to_s },
-          @exe, 'run',
-          '--queue', @redis_url,
-          '--seed', 'foobar',
-          '--build', build_id,
-          '--worker', worker_id,
-          '--timeout', '1',
-          '--retry-selection', 'worker-history',
-          '-Itest',
-          'test/passing_test.rb',
+          *args,
           chdir: 'test/fixtures/'
         )
       end

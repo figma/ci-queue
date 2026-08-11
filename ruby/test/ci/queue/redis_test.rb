@@ -79,6 +79,20 @@ class CI::Queue::RedisTest < Minitest::Test
     assert_equal 'Reservation history is missing for worker 1', error.message
   end
 
+  def test_worker_history_retry_requires_complete_replay
+    poll(@queue)
+    retry_queue = populate(@queue.retry_queue(selection: :worker_history))
+
+    error = assert_raises(CI::Queue::Redis::IncompleteRetry) do
+      retry_queue.poll do
+        retry_queue.shutdown!
+      end
+    end
+
+    assert_equal 'Worker history replay stopped before completion', error.message
+    refute_predicate retry_queue, :exhausted?
+  end
+
   def test_retry_queue_rejects_unknown_selection
     error = assert_raises(ArgumentError) do
       @queue.retry_queue(selection: :everything)

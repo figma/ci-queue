@@ -156,7 +156,12 @@ module CI
                        raise ArgumentError, "Unknown retry selection: #{selection.inspect}"
                      end
 
-          Retry.new(test_ids, config, redis: redis)
+          Retry.new(
+            test_ids,
+            config,
+            redis: redis,
+            require_exhaustion: selection == :worker_history
+          )
         end
 
         def supervisor
