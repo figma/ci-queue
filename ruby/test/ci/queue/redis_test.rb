@@ -64,6 +64,29 @@ class CI::Queue::RedisTest < Minitest::Test
     assert_equal retry_test_order, retry_test_order
   end
 
+  def test_retry_queue_with_worker_history
+    original_order = poll(@queue)
+    retry_queue = populate(@queue.retry_queue(selection: :worker_history))
+
+    assert_equal original_order, poll(retry_queue)
+  end
+
+  def test_worker_history_retry_requires_reservations
+    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
+      @queue.retry_queue(selection: :worker_history)
+    end
+
+    assert_equal 'Reservation history is missing for worker 1', error.message
+  end
+
+  def test_retry_queue_rejects_unknown_selection
+    error = assert_raises(ArgumentError) do
+      @queue.retry_queue(selection: :everything)
+    end
+
+    assert_equal 'Unknown retry selection: :everything', error.message
+  end
+
   def test_shutdown
     poll(@queue) do
       @queue.shutdown!

@@ -145,13 +145,18 @@ module CI
           end
         end
 
-        def retry_queue
-          failures = build.failed_tests.to_set
-          log = redis.lrange(key('worker', worker_id, 'queue'), 0, -1)
-          log.select! { |id| failures.include?(id) }
-          log.uniq!
-          log.reverse!
-          Retry.new(log, config, redis: redis)
+        def retry_queue(selection: :failed_tests)
+          reservations = redis.lrange(key('worker', worker_id, 'queue'), 0, -1)
+          test_ids = case selection
+                     when :failed_tests
+                       failed_test_ids(reservations)
+                     when :worker_history
+                       worker_history_test_ids(reservations)
+                     else
+                       raise ArgumentError, "Unknown retry selection: #{selection.inspect}"
+                     end
+
+          Retry.new(test_ids, config, redis: redis)
         end
 
         def supervisor
@@ -523,6 +528,31 @@ module CI
 
         def chunk_id?(id)
           id.include?(':chunk_')
+        end
+
+        def failed_test_ids(reservations)
+          failures = build.failed_tests.to_set
+          reservations.select { |id| failures.include?(id) }.uniq.reverse
+        end
+
+        def worker_history_test_ids(reservations)
+          raise WorkerHistoryError, "Reservation history is missing for worker #{worker_id}" if reservations.empty?
+
+          reservations.reverse.flat_map { |id| expand_reservation(id) }.uniq
+        end
+
+        def expand_reservation(id)
+          return [id] unless chunk_id?(id)
+
+          chunk_json = redis.get(key('chunk', id))
+          raise WorkerHistoryError, "Chunk metadata is missing for #{id}" unless chunk_json
+
+          test_ids = CI::Queue::TestChunk.from_json(id, chunk_json).test_ids
+          raise WorkerHistoryError, "Chunk metadata contains no tests for #{id}" if test_ids.empty?
+
+          test_ids
+        rescue JSON::ParserError => e
+          raise WorkerHistoryError, "Chunk metadata is invalid for #{id}: #{e.message}"
         end
 
         def resolve_executable(id)

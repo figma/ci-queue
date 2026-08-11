@@ -243,6 +243,65 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
   end
 
+  def test_worker_history_retry_expands_chunks_and_deduplicates_tests
+    tests = create_mock_tests(['TestA#test_1', 'TestA#test_2', 'TestB#test_1'])
+    chunk = CI::Queue::TestChunk.new(
+      'TestA:chunk_0',
+      'TestA',
+      ['TestA#test_1', 'TestA#test_2'],
+      2000.0
+    )
+
+    @worker.stub(:reorder_tests, [chunk, tests.last]) do
+      @worker.populate(tests)
+    end
+
+    history_key = 'build:42:worker:1:queue'
+    [chunk.id, tests.last.id, chunk.id, tests[1].id].each do |id|
+      @redis.lpush(history_key, id)
+    end
+
+    retry_queue = @worker.retry_queue(selection: :worker_history)
+    retry_queue.populate(tests)
+
+    assert_equal ['TestA#test_1', 'TestA#test_2', 'TestB#test_1'], retry_queue.to_a.map(&:id)
+  end
+
+  def test_worker_history_retry_requires_chunk_metadata
+    @redis.lpush('build:42:worker:1:queue', 'TestA:chunk_0')
+
+    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
+      @worker.retry_queue(selection: :worker_history)
+    end
+
+    assert_equal 'Chunk metadata is missing for TestA:chunk_0', error.message
+  end
+
+  def test_worker_history_retry_rejects_empty_chunks
+    @redis.set(
+      'build:42:chunk:TestA:chunk_0',
+      CI::Queue::TestChunk.new('TestA:chunk_0', 'TestA', [], 0).to_json
+    )
+    @redis.lpush('build:42:worker:1:queue', 'TestA:chunk_0')
+
+    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
+      @worker.retry_queue(selection: :worker_history)
+    end
+
+    assert_equal 'Chunk metadata contains no tests for TestA:chunk_0', error.message
+  end
+
+  def test_worker_history_retry_rejects_invalid_chunk_metadata
+    @redis.set('build:42:chunk:TestA:chunk_0', '{')
+    @redis.lpush('build:42:worker:1:queue', 'TestA:chunk_0')
+
+    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
+      @worker.retry_queue(selection: :worker_history)
+    end
+
+    assert_match 'Chunk metadata is invalid for TestA:chunk_0:', error.message
+  end
+
   private
 
   def create_mock_tests(test_ids)
