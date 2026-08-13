@@ -54,11 +54,15 @@ module Minitest
             abort! "The test run is too old and can't be retried"
           end
           reset_counters
-          retry_queue = queue.retry_queue
+          retry_queue = selected_retry_queue
           if retry_queue.exhausted?
             puts "The retry queue does not contain any failure, we'll process the main queue instead."
           else
-            puts "Retrying failed tests."
+            if queue_config.retry_selection == :worker_history
+              puts "Replaying #{retry_queue.total} tests from worker history."
+            else
+              puts "Retrying failed tests."
+            end
             self.queue = retry_queue
           end
         end
@@ -495,6 +499,14 @@ module Minitest
           end
 
           help = <<~EOS
+            Select tests for a retried worker: failed-tests (default) or worker-history.
+          EOS
+          opts.separator ""
+          opts.on('--retry-selection SELECTION', %w[failed-tests worker-history], help) do |selection|
+            queue_config.retry_selection = selection.tr('-', '_').to_sym
+          end
+
+          help = <<~EOS
             Defines how many time a single test can be requeued.
             Defaults to 0.
           EOS
@@ -740,6 +752,19 @@ module Minitest
       def retry?
         ENV["BUILDKITE_RETRY_COUNT"].to_i > 0 ||
           ENV["SEMAPHORE_PIPELINE_RERUN"] == "true"
+      end
+
+      def selected_retry_queue
+        return queue.retry_queue if queue_config.retry_selection == :failed_tests
+
+        unless queue_config.retry_selection == :worker_history
+          abort! "Unknown retry selection: #{queue_config.retry_selection.inspect}"
+        end
+        abort! 'Worker-history retry selection requires a distributed Redis queue' unless queue.distributed?
+
+        queue.retry_queue(selection: :worker_history)
+      rescue CI::Queue::Redis::WorkerHistoryError => e
+        abort! e.message
       end
     end
   end

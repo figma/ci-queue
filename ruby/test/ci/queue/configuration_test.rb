@@ -73,6 +73,12 @@ module CI::Queue
       assert_equal(28_800, config.redis_ttl)
     end
 
+    def test_retry_selection_defaults_to_failed_tests
+      config = Configuration.new
+
+      assert_equal :failed_tests, config.retry_selection
+    end
+
     def test_redis_ttl_from_env
       config = Configuration.from_env(
         "CI_QUEUE_REDIS_TTL" => "14400"

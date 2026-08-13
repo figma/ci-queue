@@ -38,6 +38,16 @@ minitest-queue --queue redis://example.com run -Itest test/**/*_test.rb
 
 Additionally you can configure the requeue settings (see main README) with `--max-requeues` and `--requeue-tolerance`.
 
+To reconstruct process-local artifacts after a distributed worker is retried, replay every test represented by that worker's reservation history:
+
+```bash
+minitest-queue --queue redis://example.com \
+  --retry-selection worker-history \
+  run -Itest test/**/*_test.rb
+```
+
+Worker-history retries require the retry to retain its worker ID and queue build ID. Missing reservation history or suite chunk metadata fails the retry. The replay uses a local retry queue and does not rejoin the shared queue, so surviving workers must drain any remaining work. When centralized reporting is used, restarting every worker before the shared queue is exhausted fails the build rather than accepting an incomplete run.
+
 
 If you'd like to centralize the error reporting you can do so with:
 

@@ -17,7 +17,9 @@ module CI
   module Queue
     module Redis
       Error = Class.new(StandardError)
+      IncompleteRetry = Class.new(Error)
       LostMaster = Class.new(Error)
+      WorkerHistoryError = Class.new(Error)
 
       class << self
 
