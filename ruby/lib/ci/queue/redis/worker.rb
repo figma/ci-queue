@@ -541,8 +541,6 @@ module CI
         end
 
         def worker_history_test_ids(reservations)
-          raise WorkerHistoryError, "Reservation history is missing for worker #{worker_id}" if reservations.empty?
-
           reservations.reverse.flat_map { |id| expand_reservation(id) }.uniq
         end
 

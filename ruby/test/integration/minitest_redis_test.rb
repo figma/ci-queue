@@ -232,13 +232,14 @@ module Integration
       assert_equal 'Ran 100 tests, 100 assertions, 0 failures, 0 errors, 0 skips, 0 requeues in X.XXs', output
     end
 
-    def test_worker_history_retry_fails_without_worker_reservations
+    def test_worker_history_retry_rejoins_queue_without_worker_reservations
       run_worker_history_worker(retry_count: 0, build_id: 'missing-history', worker_id: '1')
 
       out, = run_worker_history_worker(retry_count: 1, build_id: 'missing-history', worker_id: '2')
 
-      refute_predicate $?, :success?
-      assert_includes out, 'Reservation history is missing for worker 2'
+      assert_predicate $?, :success?
+      assert_includes out, "The retry queue does not contain any failure, we'll process the main queue instead."
+      assert_includes out, 'All tests were ran already'
     end
 
     def test_worker_history_retry_fails_when_replay_stops_early

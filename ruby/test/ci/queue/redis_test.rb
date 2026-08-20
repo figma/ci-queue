@@ -71,12 +71,10 @@ class CI::Queue::RedisTest < Minitest::Test
     assert_equal original_order, poll(retry_queue)
   end
 
-  def test_worker_history_retry_requires_reservations
-    error = assert_raises(CI::Queue::Redis::WorkerHistoryError) do
-      @queue.retry_queue(selection: :worker_history)
-    end
+  def test_worker_history_retry_without_reservations_is_empty
+    retry_queue = @queue.retry_queue(selection: :worker_history)
 
-    assert_equal 'Reservation history is missing for worker 1', error.message
+    assert_predicate retry_queue, :exhausted?
   end
 
   def test_worker_history_retry_requires_complete_replay

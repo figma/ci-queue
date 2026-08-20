@@ -46,7 +46,7 @@ minitest-queue --queue redis://example.com \
   run -Itest test/**/*_test.rb
 ```
 
-Worker-history retries require the retry to retain its worker ID and queue build ID. Missing reservation history or suite chunk metadata fails the retry. The replay uses a local retry queue and does not rejoin the shared queue, so surviving workers must drain any remaining work. When centralized reporting is used, restarting every worker before the shared queue is exhausted fails the build rather than accepting an incomplete run.
+Worker-history retries require the retry to retain its worker ID and queue build ID. A worker retried before reserving tests rejoins the shared queue, while missing suite chunk metadata fails the retry. Replaying existing history uses a local retry queue and does not rejoin the shared queue, so surviving workers must drain any remaining work. When centralized reporting is used, restarting every worker before the shared queue is exhausted fails the build rather than accepting an incomplete run.
 
 
 If you'd like to centralize the error reporting you can do so with:
