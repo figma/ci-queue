@@ -17,6 +17,21 @@ module CI::Queue
       assert_equal 'faa647bbb8168a77cf338e7488c3f8445c3e6554', config.seed
     end
 
+    def test_idle_exit_defaults_keep_every_worker_online
+      config = Configuration.from_env({})
+      assert_equal 0.0, config.idle_exit_probability
+      assert_equal 30.0, config.idle_exit_grace
+    end
+
+    def test_idle_exit_read_from_env
+      config = Configuration.from_env(
+        'CI_QUEUE_IDLE_EXIT_PROBABILITY' => '0.75',
+        'CI_QUEUE_IDLE_EXIT_GRACE' => '5',
+      )
+      assert_equal 0.75, config.idle_exit_probability
+      assert_equal 5.0, config.idle_exit_grace
+    end
+
     def test_heroku_ci_defaults
       config = Configuration.from_env(
         'HEROKU_TEST_RUN_ID' => 'YouAreAnAmazingPersonAndIBelieveYouCanDoIt',
