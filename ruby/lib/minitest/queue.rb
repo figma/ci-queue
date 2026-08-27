@@ -9,6 +9,7 @@ require 'minitest/queue/local_requeue_reporter'
 require 'minitest/queue/build_status_recorder'
 require 'minitest/queue/build_status_reporter'
 require 'minitest/queue/order_reporter'
+require 'minitest/queue/statsd'
 require 'minitest/queue/junit_reporter'
 require 'minitest/queue/test_data_reporter'
 require 'minitest/queue/grind_recorder'
@@ -232,9 +233,33 @@ module Minitest
           run_single_test(executable, reporter)
         end
       end
+      report_worker_slack
     end
 
     private
+
+    # How long this worker sat idle before leaving. Emitted here rather than from the
+    # queue because ci/queue stays framework agnostic, and Statsd lives under minitest/.
+    def report_worker_slack
+      return unless queue.respond_to?(:slack_duration)
+
+      slack = queue.slack_duration
+      return if slack.nil?
+
+      endpoint = queue.config.statsd_endpoint
+      return if endpoint.nil?
+
+      statsd = Minitest::Queue::Statsd.new(
+        addr: endpoint,
+        namespace: 'minitests.queue',
+        default_tags: ["slug:#{ENV['BUILDKITE_PROJECT_SLUG']}"],
+      )
+      statsd.measure(
+        'worker.slack',
+        slack * 1000,
+        tags: ["waits_for_requeues:#{queue.waits_for_requeues?}"],
+      )
+    end
 
     def run_chunk(chunk, reporter)
       @in_chunk_context = true

@@ -24,10 +24,30 @@ module CI
           @reserved_tests = Concurrent::Set.new
           @shutdown_required = false
           @idle_since = nil
+          @last_test_finished_at = nil
+          # A worker with nothing left to reserve normally stays online until the whole
+          # build drains, so it can pick up a test that times out or gets requeued. Only
+          # a sample needs to do that. Random.new rather than Kernel#rand: the global RNG
+          # is seeded from --seed, which is identical across workers, so every worker
+          # would draw the same number.
+          @waits_for_requeues = Random.new.rand > config.idle_exit_probability
           super(redis, config)
         end
 
         attr_accessor :idle_since
+        attr_reader :last_test_finished_at
+
+        def waits_for_requeues?
+          @waits_for_requeues
+        end
+
+        # Time between the last test finishing and the worker leaving the queue: capacity
+        # the build paid for and did not use. Nil when the worker never reserved a test.
+        def slack_duration
+          return nil if @last_test_finished_at.nil?
+
+          CI::Queue.time_now - @last_test_finished_at
+        end
 
         def distributed?
           true
@@ -75,6 +95,15 @@ module CI
           !@idle_since.nil?
         end
 
+        # Workers that did not draw the requeue duty leave once they have been idle for
+        # the grace period, instead of waiting for the whole build to drain.
+        def idle_exit?
+          return false if @waits_for_requeues
+          return false if @idle_since.nil?
+
+          CI::Queue.time_now - @idle_since >= config.idle_exit_grace
+        end
+
         def poll
           wait_for_master
           if master?
@@ -83,26 +112,28 @@ module CI
             master_id = master_worker_id
             warn "Worker #{worker_id} saw master worker: #{master_id}" if master_id
           end
-          idle_since = nil
+          @idle_since = nil
           idle_state_printed = false
           attempt = 0
-          until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
+          until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? ||
+                max_test_failed? || idle_exit?
             if id = reserve
               attempt = 0
-              idle_since = nil
+              @idle_since = nil
               executable = resolve_executable(id)
 
               if executable
                 with_heartbeat(id) do
                   yield executable
                 end
+                @last_test_finished_at = CI::Queue.time_now
               else
                 warn("Warning: Could not resolve executable for ID #{id.inspect}. Acknowledging to remove from queue.")
                 acknowledge(id)
               end
             else
-              idle_since ||= CI::Queue.time_now
-              if CI::Queue.time_now - idle_since > 120 && !idle_state_printed
+              @idle_since ||= CI::Queue.time_now
+              if CI::Queue.time_now - @idle_since > 120 && !idle_state_printed
                 puts "Worker #{worker_id} has been idle for 120 seconds. Printing global state..."
                 running_tests = redis.zrange(key('running'), 0, -1, withscores: true)
                 puts "  Processed tests: #{redis.scard(key('processed'))}"
