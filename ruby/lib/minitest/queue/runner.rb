@@ -49,6 +49,10 @@ module Minitest
 
       def run_command
         require_worker_id!
+        # A CI job retry can be the first attempt to reach the test runner.
+        # Redis uses SETNX here, so an existing run keeps its original age.
+        queue.rescue_connection_errors { queue.created_at = CI::Queue.time_now.to_f }
+
         if queue.retrying? || retry?
           if queue.expired?
             abort! "The test run is too old and can't be retried"
@@ -66,8 +70,6 @@ module Minitest
             self.queue = retry_queue
           end
         end
-
-        queue.rescue_connection_errors { queue.created_at = CI::Queue.time_now.to_f }
 
         set_load_path
         Minitest.queue = queue

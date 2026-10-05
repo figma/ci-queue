@@ -16,6 +16,21 @@ class CI::Queue::StaticTest < Minitest::Test
     refute_predicate @queue, :exhausted?
   end
 
+  def test_expiry_uses_original_start_time
+    @queue.created_at = 1000
+    @queue.created_at = 2000
+
+    CI::Queue.stub(:time_now, Time.at(1000)) do
+      refute_predicate @queue, :expired?
+    end
+    CI::Queue.stub(:time_now, Time.at(1600)) do
+      refute_predicate @queue, :expired?
+    end
+    CI::Queue.stub(:time_now, Time.at(1601)) do
+      assert_predicate @queue, :expired?
+    end
+  end
+
   private
 
   def test_from_uri

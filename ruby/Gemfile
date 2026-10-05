@@ -4,4 +4,6 @@ source 'https://rubygems.org'
 gemspec
 
 gem 'activesupport', '~> 5.2.0'
+# ActiveSupport 5.2's JSON encoder passes quirks_mode, removed in JSON 3.
+gem 'json', '< 3'
 gem 'rexml'
