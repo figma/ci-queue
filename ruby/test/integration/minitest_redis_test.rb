@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 require 'test_helper'
+require 'tempfile'
 require 'tmpdir'
 require 'active_support/testing/time_helpers'
 require 'concurrent/set'
