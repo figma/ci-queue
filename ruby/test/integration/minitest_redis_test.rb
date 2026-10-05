@@ -221,10 +221,10 @@ module Integration
     end
 
     def test_worker_history_retry_replays_all_reserved_tests
-      run_worker_history_worker(retry_count: 0)
+      run_retry_worker(retry_count: 0)
       assert_predicate $?, :success?
 
-      out, = run_worker_history_worker(retry_count: 1)
+      out, = run_retry_worker(retry_count: 1)
 
       assert_predicate $?, :success?
       assert_includes out, 'Replaying 100 tests from worker history.'
@@ -233,22 +233,111 @@ module Integration
     end
 
     def test_worker_history_retry_rejoins_queue_without_worker_reservations
-      run_worker_history_worker(retry_count: 0, build_id: 'missing-history', worker_id: '1')
+      run_retry_worker(retry_count: 0, build_id: 'missing-history', worker_id: '1')
 
-      out, = run_worker_history_worker(retry_count: 1, build_id: 'missing-history', worker_id: '2')
+      out, = run_retry_worker(retry_count: 1, build_id: 'missing-history', worker_id: '2')
 
       assert_predicate $?, :success?
       assert_includes out, "The retry queue does not contain any failure, we'll process the main queue instead."
       assert_includes out, 'All tests were ran already'
     end
 
+    def test_buildkite_retry_starts_a_test_run_after_setup_failed
+      %w[failed-tests worker-history].each do |selection|
+        [1, 2].each do |retry_count|
+          build_id = "setup-failure-#{selection}-#{retry_count}"
+          out, err = run_retry_worker(
+            retry_count: retry_count,
+            build_id: build_id,
+            retry_selection: selection,
+            extra_args: ['--namespace', 'sinatra-tests']
+          )
+
+          assert_predicate $?, :success?, out + err
+          assert_includes normalize(out), 'Ran 100 tests, 100 assertions, 0 failures, 0 errors, 0 skips, 0 requeues'
+          assert_equal 100, @redis.scard("build:sinatra-tests:#{build_id}:processed")
+        end
+      end
+    end
+
+    def test_semaphore_retry_starts_a_test_run_after_setup_failed
+      out, err = run_retry_worker(
+        retry_count: 0,
+        build_id: 'semaphore-setup-failure',
+        retry_selection: 'failed-tests',
+        environment: { 'SEMAPHORE_PIPELINE_RERUN' => 'true' }
+      )
+
+      assert_predicate $?, :success?, out + err
+      assert_includes normalize(out), 'Ran 100 tests, 100 assertions, 0 failures, 0 errors, 0 skips, 0 requeues'
+    end
+
+    def test_buildkite_retry_replays_file_queue
+      Tempfile.create(['ci-queue-retry', '.txt']) do |file|
+        file.write((0...100).map { |index| "PassingTest#test_passing_#{index}\n" }.join)
+        file.flush
+
+        out, err = run_retry_worker(
+          retry_count: 1,
+          retry_selection: 'failed-tests',
+          queue_url: file.path
+        )
+
+        assert_predicate $?, :success?, out + err
+        assert_includes normalize(out), 'Ran 100 tests, 100 assertions, 0 failures, 0 errors, 0 skips, 0 requeues'
+      end
+    end
+
+    def test_retry_preserves_existing_test_run_timestamp
+      %w[failed-tests worker-history].each do |selection|
+        build_id = "existing-run-#{selection}"
+        run_retry_worker(retry_count: 0, build_id: build_id)
+        assert_predicate $?, :success?
+        created_at = (Time.now.to_f - 3600).to_s
+        @redis.set("build:#{build_id}:created-at", created_at)
+
+        out, err = run_retry_worker(
+          retry_count: 1,
+          build_id: build_id,
+          retry_selection: selection
+        )
+
+        assert_predicate $?, :success?, out + err
+        assert_equal created_at, @redis.get("build:#{build_id}:created-at")
+        if selection == 'worker-history'
+          assert_includes out, 'Replaying 100 tests from worker history.'
+        else
+          assert_includes out, 'All tests were ran already'
+        end
+      end
+    end
+
+    def test_retry_rejects_expired_run_without_worker_history
+      %w[failed-tests worker-history].each do |selection|
+        build_id = "expired-run-#{selection}"
+        created_at = (Time.now.to_f - 24 * 60 * 60).to_s
+        @redis.set("build:#{build_id}:created-at", created_at)
+
+        out, err = run_retry_worker(
+          retry_count: 1,
+          build_id: build_id,
+          retry_selection: selection
+        )
+
+        refute_predicate $?, :success?, out + err
+        assert_includes out, "The test run is too old and can't be retried"
+        assert_equal created_at, @redis.get("build:#{build_id}:created-at")
+        assert_equal 0, @redis.scard("build:#{build_id}:processed")
+      end
+    end
+
     def test_worker_history_retry_fails_when_replay_stops_early
-      run_worker_history_worker(
+      run_retry_worker(
         retry_count: 0,
         build_id: 'incomplete-history',
         test_file: 'test/failing_test.rb'
       )
-      out, err = run_worker_history_worker(
+      out, err = run_retry_worker(
         retry_count: 1,
         build_id: 'incomplete-history',
         test_file: 'test/failing_test.rb',
@@ -827,28 +916,31 @@ module Integration
 
     private
 
-    def run_worker_history_worker(
+    def run_retry_worker(
       retry_count:,
       build_id: 'worker-history',
       worker_id: '1',
       test_file: 'test/passing_test.rb',
-      extra_args: []
+      extra_args: [],
+      retry_selection: 'worker-history',
+      environment: {},
+      queue_url: @redis_url
     )
       args = [
         @exe, 'run',
-        '--queue', @redis_url,
+        '--queue', queue_url,
         '--seed', 'foobar',
         '--build', build_id,
         '--worker', worker_id,
         '--timeout', '1',
-        '--retry-selection', 'worker-history'
+        '--retry-selection', retry_selection
       ]
       args.concat(extra_args)
       args.push('-Itest', test_file)
 
       capture_subprocess_io do
         system(
-          { 'BUILDKITE_RETRY_COUNT' => retry_count.to_s },
+          { 'BUILDKITE_RETRY_COUNT' => retry_count.to_s }.merge(environment),
           *args,
           chdir: 'test/fixtures/'
         )
