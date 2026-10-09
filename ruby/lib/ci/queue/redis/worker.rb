@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 require 'ci/queue/static'
+require 'concurrent/atomic/event'
 require 'concurrent/set'
+require 'securerandom'
 
 module CI
   module Queue
@@ -17,6 +19,8 @@ module CI
 
       class Worker < Base
         DEFAULT_SLEEP_SECONDS = 0.5
+        InitializationLeaseLost = Class.new(StandardError)
+        private_constant :InitializationLeaseLost
         attr_reader :total
 
         def initialize(redis, config)
@@ -37,18 +41,8 @@ module CI
           # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
           @total = tests.size
-
-          if acquire_master_role?
-            executables = reorder_tests(tests, random: random)
-
-            chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
-            individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
-
-            store_chunk_metadata(chunks) if chunks.any?
-
-            all_ids = chunks.map(&:id) + individual_tests.map(&:id)
-            push(all_ids)
-          end
+          @ordering_random = random.dup
+          initialize_queue(tests)
 
           register_worker_presence
 
@@ -76,7 +70,9 @@ module CI
         end
 
         def poll
-          wait_for_master
+          wait_for_master(timeout: config.queue_init_timeout) do
+            initialize_queue(index.values)
+          end
           if master?
             warn "Worker #{worker_id} is the master"
           else
@@ -274,6 +270,66 @@ module CI
 
         attr_reader :index
 
+        def initialize_queue(tests)
+          return unless acquire_master_role?
+
+          stop_renewal = Concurrent::Event.new
+          renewal = Thread.new do
+            until stop_renewal.wait(master_lease_milliseconds / 3000.0)
+              begin
+                with_master_lease do |transaction|
+                  transaction.pexpire(key('master-lease'), master_lease_milliseconds)
+                end
+              rescue InitializationLeaseLost
+                break
+              rescue *CONNECTION_ERRORS => e
+                warn "Failed to renew queue initialization lease: #{e.message}"
+              end
+            end
+          end
+
+          executables = reorder_tests(tests, random: @ordering_random.dup)
+          chunks, individual_tests = executables.partition { |e| e.is_a?(CI::Queue::TestChunk) }
+          store_chunk_metadata(chunks) if chunks.any?
+          push(chunks.map(&:id) + individual_tests.map(&:id))
+        rescue InitializationLeaseLost
+          # Another process took over. Join its queue instead of publishing ours.
+          @master = false
+        ensure
+          if renewal
+            stop_renewal.set
+            renewal.join
+            release_initialization_lease
+          end
+        end
+
+        def master_lease_milliseconds
+          # Leave time for a surviving worker to take over within its setup wait.
+          [(config.queue_init_timeout.to_f * 500).ceil, 1].max
+        end
+
+        def with_master_lease
+          redis.watch(key('master-lease'), key('master-status')) do
+            unless redis.get(key('master-lease')) == @master_token && master_status == 'setup'
+              raise InitializationLeaseLost
+            end
+
+            result = redis.multi { |transaction| yield transaction }
+            raise InitializationLeaseLost unless result
+
+            result
+          end
+        end
+
+        def release_initialization_lease
+          with_master_lease do |transaction|
+            transaction.del(key('master-lease'), key('master-status'), key('master-worker-id'))
+          end
+          @master = false
+        rescue InitializationLeaseLost, *CONNECTION_ERRORS
+          # Published queues and replacement owners must remain untouched.
+        end
+
         # Runs a block while sending periodic heartbeats in a background thread.
         # This prevents other workers from stealing the test while it's being executed.
         def with_heartbeat(test_id)
@@ -451,7 +507,7 @@ module CI
           @total = tests.size
 
           if @master
-            redis.multi do |transaction|
+            with_master_lease do |transaction|
               transaction.lpush(key('queue'), tests) unless tests.empty?
               transaction.set(key('total'), @total)
               transaction.set(key('master-status'), 'ready')
@@ -459,6 +515,7 @@ module CI
               transaction.expire(key('queue'), config.redis_ttl)
               transaction.expire(key('total'), config.redis_ttl)
               transaction.expire(key('master-status'), config.redis_ttl)
+              transaction.del(key('master-lease'))
             end
           end
         rescue *CONNECTION_ERRORS
@@ -470,20 +527,21 @@ module CI
         end
 
         def acquire_master_role?
-          return true if @master
-
-          @master = redis.setnx(key('master-status'), 'setup')
-          if @master
-            begin
-              redis.set(key('master-worker-id'), worker_id)
-              redis.expire(key('master-worker-id'), config.redis_ttl)
-              warn "Worker #{worker_id} elected as master"
-            rescue *CONNECTION_ERRORS
-              # If setting master-worker-id fails, we still have master status
-              # Log but don't lose master role
-              warn("Failed to set master-worker-id: #{$!.message}")
+          @master_token = SecureRandom.hex(16)
+          @master = !!redis.watch(key('master-status'), key('master-lease')) do
+            if %w[ready finished].include?(master_status) || redis.get(key('master-lease'))
+              redis.unwatch
+              false
+            else
+              redis.multi do |transaction|
+                transaction.set(key('master-lease'), @master_token, px: master_lease_milliseconds)
+                transaction.set(key('master-status'), 'setup')
+                transaction.set(key('master-worker-id'), worker_id)
+                transaction.expire(key('master-worker-id'), config.redis_ttl)
+              end
             end
           end
+          warn "Worker #{worker_id} elected as master" if @master
           @master
         rescue *CONNECTION_ERRORS
           @master = nil
@@ -503,7 +561,7 @@ module CI
           batch_size = 5 # 5 chunks = 20 commands + 2 expires = 22 commands per batch
 
           chunks.each_slice(batch_size) do |chunk_batch|
-            redis.multi do |transaction|
+            with_master_lease do |transaction|
               chunk_batch.each do |chunk|
                 # Store chunk metadata with TTL
                 transaction.set(
