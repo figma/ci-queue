@@ -37,18 +37,8 @@ module CI
           # All workers need an index of tests to resolve IDs
           @index = tests.map { |t| [t.id, t] }.to_h
           @total = tests.size
-
-          if acquire_master_role?
-            executables = reorder_tests(tests, random: random)
-
-            chunks = executables.select { |e| e.is_a?(CI::Queue::TestChunk) }
-            individual_tests = executables.reject { |e| e.is_a?(CI::Queue::TestChunk) }
-
-            store_chunk_metadata(chunks) if chunks.any?
-
-            all_ids = chunks.map(&:id) + individual_tests.map(&:id)
-            push(all_ids)
-          end
+          @random = random
+          initialize_queue
 
           register_worker_presence
 
@@ -76,7 +66,7 @@ module CI
         end
 
         def poll
-          wait_for_master
+          wait_for_master(timeout: config.queue_init_timeout) { initialize_queue }
           if master?
             warn "Worker #{worker_id} is the master"
           else
@@ -447,20 +437,38 @@ module CI
           lost_test
         end
 
-        def push(tests)
+        def initialize_queue
+          return unless acquire_master_role?
+
+          executables = reorder_tests(index.values, random: @random)
+          chunks, individual_tests = executables.partition { |e| e.is_a?(CI::Queue::TestChunk) }
+          push(chunks.map(&:id) + individual_tests.map(&:id), chunks: chunks)
+        end
+
+        # The setup marker can expire under a slow master, so only the first
+        # master to finish publishes.
+        def push(tests, chunks: [])
           @total = tests.size
+          return unless @master
 
-          if @master
-            redis.multi do |transaction|
-              transaction.lpush(key('queue'), tests) unless tests.empty?
-              transaction.set(key('total'), @total)
-              transaction.set(key('master-status'), 'ready')
+          published = redis.watch(key('master-status')) do
+            if queue_initialized?
+              redis.unwatch
+              nil
+            else
+              redis.multi do |transaction|
+                store_chunk_metadata(transaction, chunks)
+                transaction.lpush(key('queue'), tests) unless tests.empty?
+                transaction.set(key('total'), @total)
+                transaction.set(key('master-status'), 'ready')
 
-              transaction.expire(key('queue'), config.redis_ttl)
-              transaction.expire(key('total'), config.redis_ttl)
-              transaction.expire(key('master-status'), config.redis_ttl)
+                transaction.expire(key('queue'), config.redis_ttl)
+                transaction.expire(key('total'), config.redis_ttl)
+                transaction.expire(key('master-status'), config.redis_ttl)
+              end
             end
           end
+          @master = false unless published
         rescue *CONNECTION_ERRORS
           raise if @master
         end
@@ -472,7 +480,7 @@ module CI
         def acquire_master_role?
           return true if @master
 
-          @master = redis.setnx(key('master-status'), 'setup')
+          @master = redis.set(key('master-status'), 'setup', nx: true, px: setup_timeout_milliseconds)
           if @master
             begin
               redis.set(key('master-worker-id'), worker_id)
@@ -490,6 +498,11 @@ module CI
           false
         end
 
+        def setup_timeout_milliseconds
+          # Leave a waiting worker time to take over within queue_init_timeout.
+          [(config.queue_init_timeout.to_f * 500).ceil, 1].max
+        end
+
         def register_worker_presence
           register
           redis.expire(key('workers'), config.redis_ttl)
@@ -497,38 +510,32 @@ module CI
           raise if master?
         end
 
-        def store_chunk_metadata(chunks)
-          # Batch operations to avoid exceeding Redis multi operation limits
-          # Each chunk requires 4 commands (set, expire, sadd, hset), so batch conservatively
-          batch_size = 5 # 5 chunks = 20 commands + 2 expires = 22 commands per batch
+        def store_chunk_metadata(transaction, chunks)
+          return if chunks.empty?
 
-          chunks.each_slice(batch_size) do |chunk_batch|
-            redis.multi do |transaction|
-              chunk_batch.each do |chunk|
-                # Store chunk metadata with TTL
-                transaction.set(
-                  key('chunk', chunk.id),
-                  chunk.to_json
-                )
-                transaction.expire(key('chunk', chunk.id), config.redis_ttl)
+          chunks.each do |chunk|
+            # Store chunk metadata with TTL
+            transaction.set(
+              key('chunk', chunk.id),
+              chunk.to_json
+            )
+            transaction.expire(key('chunk', chunk.id), config.redis_ttl)
 
-                # Track all chunks for cleanup
-                transaction.sadd(key('chunks'), chunk.id)
+            # Track all chunks for cleanup
+            transaction.sadd(key('chunks'), chunk.id)
 
-                # Store dynamic timeout for this chunk
-                # Timeout = estimated_duration (in ms) converted to seconds + buffer
-                # estimated_duration is in milliseconds, convert to seconds and add 10% buffer
-                buffer_percent = 10
-                estimated_duration_seconds = chunk.estimated_duration / 1000.0
-                chunk_timeout = (estimated_duration_seconds * (1 + buffer_percent / 100.0)).round(2)
-                # Format to string to avoid floating point precision issues in Redis
-                # Use %g to remove trailing zeros
-                transaction.hset(key('test-group-timeout'), chunk.id, format('%g', chunk_timeout))
-              end
-              transaction.expire(key('chunks'), config.redis_ttl)
-              transaction.expire(key('test-group-timeout'), config.redis_ttl)
-            end
+            # Store dynamic timeout for this chunk
+            # Timeout = estimated_duration (in ms) converted to seconds + buffer
+            # estimated_duration is in milliseconds, convert to seconds and add 10% buffer
+            buffer_percent = 10
+            estimated_duration_seconds = chunk.estimated_duration / 1000.0
+            chunk_timeout = (estimated_duration_seconds * (1 + buffer_percent / 100.0)).round(2)
+            # Format to string to avoid floating point precision issues in Redis
+            # Use %g to remove trailing zeros
+            transaction.hset(key('test-group-timeout'), chunk.id, format('%g', chunk_timeout))
           end
+          transaction.expire(key('chunks'), config.redis_ttl)
+          transaction.expire(key('test-group-timeout'), config.redis_ttl)
         end
 
         def chunk_id?(id)
