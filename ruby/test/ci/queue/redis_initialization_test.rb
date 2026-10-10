@@ -16,16 +16,7 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
   end
 
   def test_surviving_worker_recovers_when_initializer_exits
-    child = fork do
-      initializer = worker(0)
-      initializer.define_singleton_method(:reorder_tests) { |*| exit! 143 }
-      initializer.populate(tests)
-    end
-    _, status = Process.wait2(child)
-
-    assert_equal 143, status.exitstatus
-    assert_equal 'setup', @redis.get(key('master-status'))
-    assert_operator @redis.pttl(key('master-lease')), :>, 0
+    exit_during_setup(worker_id: 0)
 
     survivor = worker(1).populate(tests)
     refute_predicate survivor, :master?
@@ -33,21 +24,18 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
     assert_predicate survivor, :master?
     assert_equal '1', @redis.get(key('master-worker-id'))
     assert_equal 'ready', @redis.get(key('master-status'))
-    assert_nil @redis.get(key('master-lease'))
   end
 
-  def test_worker_recovers_a_setup_marker_without_a_lease
-    @redis.set(key('master-status'), 'setup')
-    @redis.set(key('master-worker-id'), '0')
+  def test_retried_initializer_recovers_its_own_setup_marker
+    exit_during_setup(worker_id: 0)
 
-    replacement = worker(1).populate(tests)
-
-    assert_predicate replacement, :master?
-    assert_equal tests.sort, poll(replacement).sort
-    assert_equal '1', @redis.get(key('master-worker-id'))
+    retried = worker(0).populate(tests)
+    assert_equal tests.sort, poll(retried).sort
+    assert_predicate retried, :master?
+    assert_equal 'ready', @redis.get(key('master-status'))
   end
 
-  def test_setup_exception_releases_election
+  def test_worker_takes_over_after_setup_exception
     initializer = worker(0)
     initializer.define_singleton_method(:reorder_tests) { |*| raise 'setup failed' }
 
@@ -55,17 +43,17 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
     assert_equal 'setup failed', error.message
 
     replacement = worker(1).populate(tests)
-    assert_predicate replacement, :master?
     assert_equal tests.sort, poll(replacement).sort
+    assert_predicate replacement, :master?
   end
 
   def test_late_initializer_cannot_publish_over_replacement
     initializer = worker(0)
     replacement = worker(1)
     redis = @redis
-    lease_key = key('master-lease')
+    status_key = key('master-status')
     initializer.define_singleton_method(:reorder_tests) do |input, **|
-      redis.del(lease_key)
+      redis.del(status_key)
       replacement.populate(input)
       input.reverse
     end
@@ -82,11 +70,11 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
     initializer = worker(0)
     replacement = worker(1, strategy: :suite_bin_packing)
     redis = @redis
-    lease_key = key('master-lease')
+    status_key = key('master-status')
     chunk_key = key('chunk:ATest:chunk_0')
     published_metadata = nil
     initializer.define_singleton_method(:reorder_tests) do |input, **|
-      redis.del(lease_key)
+      redis.del(status_key)
       replacement.populate(input)
       published_metadata = redis.get(chunk_key)
       [CI::Queue::TestChunk.new('ATest:chunk_0', 'ATest', [input.first.id], 9999)]
@@ -99,7 +87,7 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
     assert_equal tests.sort, poll(replacement).flat_map(&:tests).sort
   end
 
-  def test_live_initializer_renews_lease_during_slow_setup
+  def test_waiting_worker_does_not_take_over_a_live_setup
     initializer = worker(0)
     started = Queue.new
     proceed = Queue.new
@@ -110,16 +98,16 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
     end
     thread = Thread.new { initializer.populate(tests) }
     started.pop
-    sleep 0.4 # Longer than the initial 0.25-second lease.
 
     contender = worker(1).populate(tests)
     refute_predicate contender, :master?
-    assert_equal '0', @redis.get(key('master-worker-id'))
+    assert_equal 'setup', @redis.get(key('master-status'))
 
     proceed << true
     assert thread.join(2), 'initializer did not complete'
     assert_predicate initializer, :master?
     assert_equal tests.sort, poll(contender).sort
+    refute_predicate contender, :master?
   ensure
     proceed << true if proceed
     thread&.kill
@@ -127,6 +115,19 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
   end
 
   private
+
+  def exit_during_setup(worker_id:)
+    child = fork do
+      initializer = worker(worker_id)
+      initializer.define_singleton_method(:reorder_tests) { |*| exit! 143 }
+      initializer.populate(tests)
+    end
+    _, status = Process.wait2(child)
+
+    assert_equal 143, status.exitstatus
+    assert_equal 'setup', @redis.get(key('master-status'))
+    assert_operator @redis.pttl(key('master-status')), :>, 0
+  end
 
   def tests
     SharedQueueAssertions::TEST_LIST.dup
