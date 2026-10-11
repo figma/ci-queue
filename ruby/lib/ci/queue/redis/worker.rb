@@ -654,3 +654,69 @@ module CI
     end
   end
 end
+
+# Diagnostic instrumentation shared verbatim by the two experiment branches.
+# It adds no Redis commands and logs only initialization and the first reservation.
+module QueueInitExperiment
+  def populate(*args, **kwargs)
+    experiment_log('populate_start', tests: args.first.size, init_timeout: config.queue_init_timeout)
+    super
+  ensure
+    experiment_log('populate_end')
+  end
+
+  def acquire_master_role?(*args, **kwargs)
+    @experiment_election_attempts = (@experiment_election_attempts || 0) + 1
+    result = super
+    if result && !@experiment_elected_at
+      @experiment_elected_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      @experiment_elected_cpu = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+      experiment_log('elected')
+    end
+    result
+  end
+
+  def push(*args, **kwargs)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    experiment_log('publish_start', executables: args.first.size)
+    result = super
+    experiment_log('publish_end', master: master?, publish_s: Process.clock_gettime(Process::CLOCK_MONOTONIC) - started,
+      setup_s: Process.clock_gettime(Process::CLOCK_MONOTONIC) - @experiment_elected_at,
+      setup_cpu_s: Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - @experiment_elected_cpu)
+    result
+  end
+
+  def store_chunk_metadata(*args)
+    experiment_log('metadata_start', chunks: args.last.size)
+    super
+  ensure
+    experiment_log('metadata_end')
+  end
+
+  def wait_for_master(*args, **kwargs, &block)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    super
+  ensure
+    experiment_log('wait_end', wait_s: Process.clock_gettime(Process::CLOCK_MONOTONIC) - started,
+      election_attempts: @experiment_election_attempts || 0)
+  end
+
+  def poll
+    super do |executable|
+      unless @experiment_reserved
+        @experiment_reserved = true
+        experiment_log('first_test')
+      end
+      yield executable
+    end
+  end
+
+  private
+
+  def experiment_log(event, **fields)
+    fields = {event: event, worker: worker_id, time: Time.now.utc.strftime('%Y-%m-%dT%H:%M:%S.%6NZ')}.merge(fields)
+    warn('[queue-init-experiment] ' + fields.map { |name, value| "#{name}=#{value}" }.join(' '))
+  end
+end
+
+CI::Queue::Redis::Worker.prepend(QueueInitExperiment)
