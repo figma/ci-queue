@@ -71,11 +71,13 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
     replacement = worker(1, strategy: :suite_bin_packing)
     redis = @redis
     status_key = key('master-status')
-    chunk_key = key('chunk:ATest:chunk_0')
+    chunk_key = nil
     published_metadata = nil
     initializer.define_singleton_method(:reorder_tests) do |input, **|
       redis.del(status_key)
       replacement.populate(input)
+      chunk_id = redis.lrange(key('queue'), 0, -1).find { |id| id.start_with?('ATest:chunk_0:') }
+      chunk_key = key("chunk:#{chunk_id}")
       published_metadata = redis.get(chunk_key)
       [CI::Queue::TestChunk.new('ATest:chunk_0', 'ATest', [input.first.id], 9999)]
     end
@@ -112,6 +114,48 @@ class CI::Queue::Redis::InitializationTest < Minitest::Test
     proceed << true if proceed
     thread&.kill
     thread&.join
+  end
+
+  def test_chunk_initialization_keeps_transactions_bounded
+    initializer = worker(0, strategy: :suite_bin_packing)
+    client = initializer.send(:redis)
+    original_multi = client.method(:multi)
+    transaction_sizes = []
+    client.define_singleton_method(:multi) do |*args, &block|
+      original_multi.call(*args) do |transaction|
+        count = 0
+        proxy = Object.new
+        %i[set expire sadd hset lpush llen zcard].each do |command|
+          proxy.define_singleton_method(command) do |*command_args|
+            count += 1
+            transaction.public_send(command, *command_args)
+          end
+        end
+        result = block.call(proxy)
+        raise ArgumentError, 'Maximum cardinality of 25 exceeded' if count > 25
+
+        transaction_sizes << count
+        result
+      end
+    end
+    input = 20.times.map { |i| SharedTestCases::TestCase.new("Suite#{i}#test") }
+
+    initializer.populate(input)
+    assert_equal input.sort, poll(initializer).flat_map(&:tests).sort
+    assert_equal [22, 22, 22, 22, 6], transaction_sizes.take(5)
+  end
+
+  def test_recovery_after_partial_chunk_staging
+    initializer = worker(0, strategy: :suite_bin_packing)
+    initializer.define_singleton_method(:store_chunk_metadata) do |chunks|
+      super(chunks.first(1))
+      raise 'staging failed'
+    end
+    assert_raises(RuntimeError) { initializer.populate(tests) }
+
+    replacement = worker(0, strategy: :suite_bin_packing).populate(tests)
+    assert_equal tests.sort, poll(replacement).flat_map(&:tests).sort
+    assert_predicate replacement, :master?
   end
 
   private

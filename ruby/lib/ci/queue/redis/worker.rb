@@ -2,6 +2,7 @@
 
 require 'ci/queue/static'
 require 'concurrent/set'
+require 'securerandom'
 
 module CI
   module Queue
@@ -442,12 +443,22 @@ module CI
 
           executables = reorder_tests(index.values, random: @random)
           chunks, individual_tests = executables.partition { |e| e.is_a?(CI::Queue::TestChunk) }
-          push(chunks.map(&:id) + individual_tests.map(&:id), chunks: chunks)
+          # An initializer may outlive its setup marker. Give its chunks unique
+          # IDs so staging metadata cannot overwrite another initializer's data.
+          initialization_id = SecureRandom.hex(8)
+          chunks = chunks.map do |chunk|
+            CI::Queue::TestChunk.new(
+              "#{chunk.id}:#{initialization_id}", chunk.suite_name,
+              chunk.test_ids, chunk.estimated_duration, test_count: chunk.test_count
+            )
+          end
+          store_chunk_metadata(chunks)
+          push(chunks.map(&:id) + individual_tests.map(&:id))
         end
 
         # The setup marker can expire under a slow master, so only the first
         # master to finish publishes.
-        def push(tests, chunks: [])
+        def push(tests)
           @total = tests.size
           return unless @master
 
@@ -457,7 +468,6 @@ module CI
               nil
             else
               redis.multi do |transaction|
-                store_chunk_metadata(transaction, chunks)
                 transaction.lpush(key('queue'), tests) unless tests.empty?
                 transaction.set(key('total'), @total)
                 transaction.set(key('master-status'), 'ready')
@@ -510,32 +520,37 @@ module CI
           raise if master?
         end
 
-        def store_chunk_metadata(transaction, chunks)
-          return if chunks.empty?
+        def store_chunk_metadata(chunks)
+          # Four commands per chunk, plus two expiry commands: at most 22.
+          batch_size = 5
 
-          chunks.each do |chunk|
-            # Store chunk metadata with TTL
-            transaction.set(
-              key('chunk', chunk.id),
-              chunk.to_json
-            )
-            transaction.expire(key('chunk', chunk.id), config.redis_ttl)
+          chunks.each_slice(batch_size) do |chunk_batch|
+            redis.multi do |transaction|
+              chunk_batch.each do |chunk|
+                # Store chunk metadata with TTL
+                transaction.set(
+                  key('chunk', chunk.id),
+                  chunk.to_json
+                )
+                transaction.expire(key('chunk', chunk.id), config.redis_ttl)
 
-            # Track all chunks for cleanup
-            transaction.sadd(key('chunks'), chunk.id)
+                # Track all chunks for cleanup
+                transaction.sadd(key('chunks'), chunk.id)
 
-            # Store dynamic timeout for this chunk
-            # Timeout = estimated_duration (in ms) converted to seconds + buffer
-            # estimated_duration is in milliseconds, convert to seconds and add 10% buffer
-            buffer_percent = 10
-            estimated_duration_seconds = chunk.estimated_duration / 1000.0
-            chunk_timeout = (estimated_duration_seconds * (1 + buffer_percent / 100.0)).round(2)
-            # Format to string to avoid floating point precision issues in Redis
-            # Use %g to remove trailing zeros
-            transaction.hset(key('test-group-timeout'), chunk.id, format('%g', chunk_timeout))
+                # Store dynamic timeout for this chunk
+                # Timeout = estimated_duration (in ms) converted to seconds + buffer
+                # estimated_duration is in milliseconds, convert to seconds and add 10% buffer
+                buffer_percent = 10
+                estimated_duration_seconds = chunk.estimated_duration / 1000.0
+                chunk_timeout = (estimated_duration_seconds * (1 + buffer_percent / 100.0)).round(2)
+                # Format to string to avoid floating point precision issues in Redis
+                # Use %g to remove trailing zeros
+                transaction.hset(key('test-group-timeout'), chunk.id, format('%g', chunk_timeout))
+              end
+              transaction.expire(key('chunks'), config.redis_ttl)
+              transaction.expire(key('test-group-timeout'), config.redis_ttl)
+            end
           end
-          transaction.expire(key('chunks'), config.redis_ttl)
-          transaction.expire(key('test-group-timeout'), config.redis_ttl)
         end
 
         def chunk_id?(id)
