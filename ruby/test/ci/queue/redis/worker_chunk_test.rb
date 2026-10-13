@@ -36,7 +36,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
 
     # Verify chunk metadata was stored
-    chunk_data = @redis.get('build:42:chunk:TestA:chunk_0')
+    chunk_data = @redis.get("build:42:chunk:#{stored_chunk_id('TestA:chunk_0')}")
     refute_nil chunk_data
 
     parsed = JSON.parse(chunk_data)
@@ -100,10 +100,10 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
 
     # Manually store and resolve chunk
-    resolved = @worker.send(:resolve_chunk, 'TestA:chunk_0')
+    resolved = @worker.send(:resolve_chunk, stored_chunk_id('TestA:chunk_0'))
 
     assert_instance_of CI::Queue::Redis::Worker::ResolvedChunk, resolved
-    assert_equal 'TestA:chunk_0', resolved.id
+    assert_match /\ATestA:chunk_0(?::[0-9a-f]{16})?\z/, resolved.id
     assert_equal 'TestA', resolved.suite_name
     assert_equal 3, resolved.tests.size
     assert_equal test_ids, resolved.tests.map(&:id)
@@ -120,10 +120,10 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       @worker.populate(tests)
     end
 
-    resolved = @worker.send(:resolve_chunk, 'TestA:chunk_0')
+    resolved = @worker.send(:resolve_chunk, stored_chunk_id('TestA:chunk_0'))
 
     assert_instance_of CI::Queue::Redis::Worker::ResolvedChunk, resolved
-    assert_equal 'TestA:chunk_0', resolved.id
+    assert_match /\ATestA:chunk_0(?::[0-9a-f]{16})?\z/, resolved.id
     assert_equal 2, resolved.tests.size
     assert_equal ['TestA#test_1', 'TestA#test_3'], resolved.tests.map(&:id)
   end
@@ -140,7 +140,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
     resolved = CI::Queue::Redis::Worker::ResolvedChunk.new(chunk, tests)
 
-    assert_equal 'TestA:chunk_0', resolved.id
+    assert_match /\ATestA:chunk_0(?::[0-9a-f]{16})?\z/, resolved.id
     assert_equal 'TestA', resolved.suite_name
     assert_equal 2, resolved.size
     assert resolved.chunk?
@@ -195,7 +195,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
     # Check that both chunk and individual test IDs are in queue
     queue_items = @redis.lrange('build:42:queue', 0, -1)
-    assert_includes queue_items, 'TestA:chunk_0'
+    assert_includes queue_items, stored_chunk_id('TestA:chunk_0')
     assert_includes queue_items, 'TestB#test_1'
   end
 
@@ -210,12 +210,12 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
       @worker.populate(tests)
     end
 
-    ttl = @redis.ttl('build:42:chunk:TestA:chunk_0')
+    ttl = @redis.ttl("build:42:chunk:#{stored_chunk_id('TestA:chunk_0')}")
     assert ttl > 0, 'Chunk metadata should have TTL set'
   end
 
   def test_populate_with_many_chunks_uses_batching
-    # Create 20 test chunks to verify batching works (batch size is 7)
+    # Create 20 test chunks to verify batching works (batch size is 5)
     tests = (1..20).map { |i| MockTest.new("TestSuite#{i}#test_1") }
     chunks = (1..20).map do |i|
       test_ids = ["TestSuite#{i}#test_1"]
@@ -228,7 +228,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
 
     # Verify all chunks were stored despite batching
     chunks.each do |chunk|
-      chunk_data = @redis.get("build:42:chunk:#{chunk.id}")
+      chunk_data = @redis.get("build:42:chunk:#{stored_chunk_id(chunk.id)}")
       refute_nil chunk_data, "Chunk #{chunk.id} should be stored"
 
       parsed = JSON.parse(chunk_data)
@@ -239,7 +239,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     # Verify all chunk IDs are in the chunks set
     stored_chunks = @redis.smembers('build:42:chunks')
     chunks.each do |chunk|
-      assert_includes stored_chunks, chunk.id
+      assert_includes stored_chunks, stored_chunk_id(chunk.id)
     end
   end
 
@@ -257,7 +257,7 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
     end
 
     history_key = 'build:42:worker:1:queue'
-    [chunk.id, tests.last.id, chunk.id, tests[1].id].each do |id|
+    [stored_chunk_id(chunk.id), tests.last.id, stored_chunk_id(chunk.id), tests[1].id].each do |id|
       @redis.lpush(history_key, id)
     end
 
@@ -303,6 +303,10 @@ class CI::Queue::WorkerChunkTest < Minitest::Test
   end
 
   private
+
+  def stored_chunk_id(original_id)
+    @redis.smembers('build:42:chunks').find { |id| id.start_with?("#{original_id}:") }
+  end
 
   def create_mock_tests(test_ids)
     test_ids.map { |id| MockTest.new(id) }

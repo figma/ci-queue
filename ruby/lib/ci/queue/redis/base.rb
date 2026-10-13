@@ -59,6 +59,9 @@ module CI
           (timeout * 10 + 1).to_i.times do
             return true if queue_initialized?
 
+            yield if block_given?
+            return true if queue_initialized?
+
             sleep 0.1
           end
           raise LostMaster, "The master worker (worker #{master_worker_id}) is still `#{master_status}` after #{timeout} seconds waiting."
