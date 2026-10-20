@@ -16,6 +16,7 @@ module CI
       attr_accessor :write_duration_averages
       attr_accessor :heartbeat_grace_period, :heartbeat_interval
       attr_accessor :retry_selection
+      attr_accessor :idle_exit_probability, :idle_exit_grace
       attr_reader :circuit_breakers
       attr_writer :seed, :build_id
       attr_writer :queue_init_timeout, :report_timeout, :inactive_workers_timeout
@@ -31,6 +32,8 @@ module CI
             redis_ttl: env['CI_QUEUE_REDIS_TTL']&.to_i ||  8 * 60 * 60,
             known_flaky_tests: load_known_flaky_tests(env['CI_QUEUE_KNOWN_FLAKY_TESTS']),
             branch: env['BUILDKITE_BRANCH'],
+            idle_exit_probability: env['CI_QUEUE_IDLE_EXIT_PROBABILITY']&.to_f || 0.0,
+            idle_exit_grace: env['CI_QUEUE_IDLE_EXIT_GRACE']&.to_f || 30.0,
           )
         end
 
@@ -68,7 +71,9 @@ module CI
         timing_redis_url: nil,
         heartbeat_grace_period: 30,
         heartbeat_interval: 10,
-        retry_selection: :failed_tests
+        retry_selection: :failed_tests,
+        idle_exit_probability: 0.0,
+        idle_exit_grace: 30.0
       )
         @build_id = build_id
         @circuit_breakers = [CircuitBreaker::Disabled]
@@ -108,6 +113,8 @@ module CI
         @heartbeat_grace_period = heartbeat_grace_period
         @heartbeat_interval = heartbeat_interval
         @retry_selection = retry_selection
+        @idle_exit_probability = idle_exit_probability
+        @idle_exit_grace = idle_exit_grace
       end
 
       def queue_init_timeout
